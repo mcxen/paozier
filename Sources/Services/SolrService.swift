@@ -4,9 +4,17 @@ actor SolrService {
     static let shared = SolrService()
     private let baseURL = "http://localhost:8983/solr/paozier"
 
-    func search(query: String, rows: Int = 20) async throws -> [SearchResult] {
-        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        let urlStr = "\(baseURL)/select?q=\(encoded)&rows=\(rows)&hl=true&hl.fl=content,title,file_name&hl.snippets=3&hl.fragsize=200&wt=json"
+    func search(query: String, rows: Int = 20, proximity: Int? = nil) async throws -> [SearchResult] {
+        var q = query
+        // Proximity search: "term1 term2"~N
+        if let dist = proximity, dist > 0 {
+            let terms = query.split(separator: " ").map(String.init)
+            if terms.count >= 2 {
+                q = "\"\(terms.joined(separator: " "))\"~\(dist)"
+            }
+        }
+        let encoded = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
+        let urlStr = "\(baseURL)/select?q=\(encoded)&rows=\(rows)&hl=true&hl.fl=content,title,file_name&hl.snippets=5&hl.fragsize=300&fl=id,file_path,file_name,title,author,file_size,content&wt=json"
         guard let url = URL(string: urlStr) else { throw SolrError.invalidURL }
 
         let (data, _) = try await URLSession.shared.data(from: url)
@@ -17,10 +25,8 @@ actor SolrService {
 
         return docs.map { doc in
             let id = doc["id"] as? String ?? UUID().uuidString
-            let snippets = highlighting[id]?["content"] ?? highlighting[id]?["title"] ?? []
-            let snippet = snippets.joined(separator: " ... ")
-                .replacingOccurrences(of: "<em>", with: "")
-                .replacingOccurrences(of: "</em>", with: "")
+            let hlSnippets = highlighting[id]?["content"] ?? highlighting[id]?["title"] ?? []
+            let snippet = hlSnippets.joined(separator: " ... ")
 
             return SearchResult(
                 id: id,
@@ -29,6 +35,7 @@ actor SolrService {
                 title: (doc["title"] as? String) ?? "",
                 author: (doc["author"] as? String) ?? "",
                 snippet: snippet,
+                content: (doc["content"] as? String) ?? "",
                 fileSize: (doc["file_size"] as? Int64) ?? 0,
                 lastModified: nil
             )

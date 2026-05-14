@@ -7,6 +7,7 @@ struct SearchResult: Identifiable, Hashable {
     let title: String
     let author: String
     let snippet: String
+    let content: String
     let fileSize: Int64
     let lastModified: Date?
 }
