@@ -1,0 +1,86 @@
+import SwiftUI
+
+struct HistoryView: View {
+    @EnvironmentObject var dataManager: DataManager
+    @Environment(\.dismiss) var dismiss
+    var onSelect: (String) -> Void
+
+    @State private var tab = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Picker("", selection: $tab) {
+                    Text("历史").tag(0)
+                    Text("书签").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 160)
+                Spacer()
+                if tab == 0 {
+                    Button("清空历史") { dataManager.clearHistory() }
+                        .controlSize(.small)
+                }
+                Button("关闭") { dismiss() }
+                    .controlSize(.small)
+            }
+            .padding(12)
+            .background(.bar)
+
+            Divider()
+
+            if tab == 0 {
+                List(dataManager.history) { item in
+                    Button {
+                        onSelect(item.query)
+                    } label: {
+                        HStack {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.query)
+                                    .font(.callout)
+                                HStack {
+                                    Text("\(item.resultCount) 结果")
+                                    Text(item.date, style: .relative)
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.plain)
+            } else {
+                List(dataManager.bookmarks) { bm in
+                    HStack {
+                        Button {
+                            onSelect(bm.query)
+                        } label: {
+                            HStack {
+                                Image(systemName: "bookmark.fill")
+                                    .foregroundStyle(.orange)
+                                    .font(.caption)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(bm.name).font(.callout)
+                                    Text(bm.query).font(.caption2).foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                        Button { dataManager.removeBookmark(id: bm.id) } label: {
+                            Image(systemName: "trash").font(.caption)
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.red)
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+        .frame(minWidth: 400, minHeight: 300)
+    }
+}
