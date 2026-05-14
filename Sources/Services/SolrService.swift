@@ -37,19 +37,44 @@ actor SolrService {
 
     func indexPDF(at fileURL: URL) async throws {
         let id = fileURL.path.data(using: .utf8)!.base64EncodedString()
-        let urlStr = "\(baseURL)/update/extract?literal.id=\(id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!)&literal.file_path=\(fileURL.path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!)&literal.file_name=\(fileURL.lastPathComponent.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!)&commit=false&wt=json"
+        let fileName = fileURL.lastPathComponent
+        let filePath = fileURL.path
+        let urlStr = "\(baseURL)/update/extract?literal.id=\(id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!)&literal.file_path=\(filePath.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!)&literal.file_name=\(fileName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!)&commit=false&wt=json"
 
         guard let url = URL(string: urlStr) else { throw SolrError.invalidURL }
 
         let fileData = try Data(contentsOf: fileURL)
+        let mimeType = Self.mimeType(for: fileURL.pathExtension)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("application/pdf", forHTTPHeaderField: "Content-Type")
+        request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
         request.httpBody = fileData
 
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode < 300 else {
             throw SolrError.indexFailed
+        }
+    }
+
+    private static func mimeType(for ext: String) -> String {
+        switch ext.lowercased() {
+        case "pdf": return "application/pdf"
+        case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        case "doc": return "application/msword"
+        case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        case "ppt": return "application/vnd.ms-powerpoint"
+        case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        case "xls": return "application/vnd.ms-excel"
+        case "rtf": return "application/rtf"
+        case "html", "htm": return "text/html"
+        case "xml": return "application/xml"
+        case "json": return "application/json"
+        case "csv", "tsv": return "text/csv"
+        case "epub": return "application/epub+zip"
+        case "odt": return "application/vnd.oasis.opendocument.text"
+        case "ods": return "application/vnd.oasis.opendocument.spreadsheet"
+        case "odp": return "application/vnd.oasis.opendocument.presentation"
+        default: return "text/plain"
         }
     }
 

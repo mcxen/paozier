@@ -14,10 +14,18 @@ class SolrManager: ObservableObject {
     private var solrProcess: Process?
     private let solrPort = 8983
     private let dataDir: URL
+    private let solrHome: URL
+
+    static let supportedExtensions: Set<String> = [
+        "pdf", "txt", "md", "markdown", "docx", "doc", "rtf",
+        "html", "htm", "xml", "json", "csv", "tsv",
+        "pptx", "ppt", "xlsx", "xls", "odt", "ods", "odp", "epub"
+    ]
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         dataDir = appSupport.appendingPathComponent("Paozier", isDirectory: true)
+        solrHome = dataDir.appendingPathComponent("solr", isDirectory: true)
         try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
         loadFolders()
     }
@@ -28,6 +36,7 @@ class SolrManager: ObservableObject {
         guard !isRunning else { return }
         statusMessage = "启动 Solr..."
 
+        // Solr binary: bundled in app or project root
         let solrDir = Bundle.main.resourceURL?.appendingPathComponent("solr")
             ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("solr")
 
@@ -37,9 +46,28 @@ class SolrManager: ObservableObject {
             return
         }
 
+        // Ensure core config exists in app data solrHome
+        let coreDir = solrHome.appendingPathComponent("paozier")
+        let confDir = coreDir.appendingPathComponent("conf")
+        try? FileManager.default.createDirectory(at: confDir, withIntermediateDirectories: true)
+
+        let corePropFile = coreDir.appendingPathComponent("core.properties")
+        if !FileManager.default.fileExists(atPath: corePropFile.path) {
+            try? "name=paozier".write(to: corePropFile, atomically: true, encoding: .utf8)
+        }
+        // Copy config from bundle/project
+        let srcConf = solrDir.appendingPathComponent("server/solr/paozier/conf")
+        for file in ["schema.xml", "solrconfig.xml"] {
+            let src = srcConf.appendingPathComponent(file)
+            let dst = confDir.appendingPathComponent(file)
+            if FileManager.default.fileExists(atPath: src.path) && !FileManager.default.fileExists(atPath: dst.path) {
+                try? FileManager.default.copyItem(at: src, to: dst)
+            }
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binPath)
-        process.arguments = ["start", "-f", "-p", "\(solrPort)"]
+        process.arguments = ["start", "-f", "-p", "\(solrPort)", "-s", solrHome.path]
         process.environment = {
             var env = ProcessInfo.processInfo.environment
             env["SOLR_SECURITY_MANAGER_ENABLED"] = "false"
@@ -144,13 +172,13 @@ class SolrManager: ObservableObject {
     private func findPDFs(in directory: URL) -> [URL] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return [] }
-        var pdfs: [URL] = []
+        var files: [URL] = []
         for case let fileURL as URL in enumerator {
-            if fileURL.pathExtension.lowercased() == "pdf" {
-                pdfs.append(fileURL)
+            if Self.supportedExtensions.contains(fileURL.pathExtension.lowercased()) {
+                files.append(fileURL)
             }
         }
-        return pdfs
+        return files
     }
 
     private var foldersFile: URL { dataDir.appendingPathComponent("folders.json") }

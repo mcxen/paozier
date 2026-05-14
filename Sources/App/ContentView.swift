@@ -22,12 +22,22 @@ struct ContentView: View {
             if let result = selectedResult {
                 PDFPreviewView(filePath: result.filePath)
             } else {
-                Text("选择搜索结果预览 PDF")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 12) {
+                    Image(systemName: "doc.text.below.ecg")
+                        .font(.system(size: 44, weight: .thin))
+                        .foregroundStyle(.quaternary)
+                    Text("选择搜索结果预览文档")
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.3))
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .task {
+            await solrManager.startSolr()
+        }
     }
 
     private func performSearch() {
