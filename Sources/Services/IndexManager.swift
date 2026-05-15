@@ -3,6 +3,8 @@ import AppKit
 
 @MainActor
 class IndexManager: ObservableObject {
+    static weak var shared: IndexManager?
+
     @Published var isReady = false
     @Published var isIndexing = false
     @Published var indexProgress: Double = 0
@@ -30,6 +32,7 @@ class IndexManager: ObservableObject {
         dataDir = appSupport.appendingPathComponent("Paozier", isDirectory: true)
         try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
         loadFolders()
+        IndexManager.shared = self
     }
 
     func startup() async {
