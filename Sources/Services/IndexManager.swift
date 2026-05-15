@@ -38,7 +38,14 @@ class IndexManager: ObservableObject {
     }
 
     func startup() async {
+        let s = AppSettings.shared
         statusMessage = "初始化搜索引擎..."
+        await SearchEngine.shared.updateSettings(
+            limit: s.searchResultLimit,
+            skWeight: s.searchEngineWeightSK,
+            ftsWeight: s.searchEngineWeightFTS,
+            searchFilenames: s.searchFilenames
+        )
         await Task.detached {
             await SearchEngine.shared.open()
         }.value

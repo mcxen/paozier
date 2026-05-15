@@ -12,6 +12,12 @@ struct SidebarView: View {
                     Text("SearchKit + FTS5").font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button { SettingsWindowController.shared.show() } label: {
+                    Image(systemName: "gearshape").font(.callout)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("设置")
             }
             .padding(.horizontal, 14).padding(.vertical, 12).background(.ultraThinMaterial)
             Divider()

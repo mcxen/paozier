@@ -8,23 +8,15 @@ final class GlobalSearchPopupController {
     static let shared = GlobalSearchPopupController()
     private var window: NSWindow?
     private var monitor: Any?
-    private var localMonitor: Any?
 
     func registerHotkey() {
-        // Cmd+Shift+F global hotkey
+        // Global hotkey (Cmd+Shift+F) — only fires when app is NOT focused
         monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.modifierFlags.contains([.command, .shift]) && event.keyCode == 3 { // 3 = 'F'
-                DispatchQueue.main.async { self?.toggle() }
-            }
-        }
-        // Also monitor when app is focused
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.modifierFlags.contains([.command, .shift]) && event.keyCode == 3 {
                 DispatchQueue.main.async { self?.toggle() }
-                return nil
             }
-            return event
         }
+        // When app IS focused, the .keyboardShortcut in ContentView handles it
     }
 
     func toggle() {
@@ -149,10 +141,21 @@ struct GlobalSearchPopupView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.1)))
         .shadow(color: .black.opacity(0.2), radius: 20, y: 8)
         .onAppear { focused = true }
-        .onChange(of: query) { _, _ in search() }
+        .onChange(of: query) { _, _ in debouncedSearch() }
         .onKeyPress(.upArrow) { moveSelection(-1); return .handled }
         .onKeyPress(.downArrow) { moveSelection(1); return .handled }
         .onKeyPress(.escape) { onDismiss(); return .handled }
+    }
+
+    @State private var searchTask: Task<Void, Never>?
+
+    private func debouncedSearch() {
+        searchTask?.cancel()
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms debounce for IME
+            guard !Task.isCancelled else { return }
+            await MainActor.run { search() }
+        }
     }
 
     private func search() {

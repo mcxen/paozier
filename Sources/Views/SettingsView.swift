@@ -1,8 +1,36 @@
 import SwiftUI
+import AppKit
+
+// MARK: - Standalone Window Controller
+
+final class SettingsWindowController {
+    static let shared = SettingsWindowController()
+    private var window: NSWindow?
+
+    func show() {
+        if let window, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        let w = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 540, height: 440),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        w.title = "Paozier 设置"
+        w.center()
+        w.contentView = NSHostingView(rootView: SettingsView())
+        w.isReleasedWhenClosed = false
+        self.window = w
+        w.makeKeyAndOrderFront(nil)
+    }
+}
+
+// MARK: - Settings View
 
 struct SettingsView: View {
     @ObservedObject var settings = AppSettings.shared
-    @Environment(\.dismiss) var dismiss
     @State private var newExtension = ""
     @State private var showClearConfirm = false
     @State private var clearTarget = ""
@@ -13,7 +41,7 @@ struct SettingsView: View {
                 Image(systemName: "gearshape.fill").foregroundStyle(.blue)
                 Text("设置").font(.headline)
                 Spacer()
-                Button("完成") { dismiss() }.buttonStyle(.borderedProminent).controlSize(.small)
+                Button("完成") { NSApp.keyWindow?.close() }.buttonStyle(.borderedProminent).controlSize(.small)
             }
             .padding(12)
             .background(.bar)
@@ -39,6 +67,7 @@ struct SettingsView: View {
         .onChange(of: settings.defaultPreviewMode) { _, _ in settings.save() }
         .onChange(of: settings.historyMaxItems) { _, _ in settings.save() }
         .onChange(of: settings.excludedExtensions) { _, _ in settings.save() }
+        .onChange(of: settings.searchFilenames) { _, _ in settings.save() }
     }
 
     // MARK: - General
@@ -77,6 +106,9 @@ struct SettingsView: View {
                     Text(String(format: "%.1f", settings.searchEngineWeightFTS)).monospacedDigit().frame(width: 30)
                 }
                 Text("权重决定双引擎结果的融合排序比例").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("范围") {
+                Toggle("同时搜索文件名", isOn: $settings.searchFilenames)
             }
         }
         .formStyle(.grouped)

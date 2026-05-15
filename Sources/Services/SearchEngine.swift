@@ -17,11 +17,13 @@ actor SearchEngine {
     var _settingsLimit: Int = 30
     var _settingsSKWeight: Double = 0.6
     var _settingsFTSWeight: Double = 0.4
+    var _searchFilenames: Bool = true
 
-    func updateSettings(limit: Int, skWeight: Double, ftsWeight: Double) {
+    func updateSettings(limit: Int, skWeight: Double, ftsWeight: Double, searchFilenames: Bool = true) {
         _settingsLimit = limit
         _settingsSKWeight = skWeight
         _settingsFTSWeight = ftsWeight
+        _searchFilenames = searchFilenames
     }
 
     init() {
@@ -127,17 +129,42 @@ actor SearchEngine {
 
         let sorted = scoreMap.values.sorted { $0.score > $1.score }.prefix(effectiveLimit)
 
-        return sorted.map { item in
+        // Filename matching: add results where filename matches but content didn't
+        var filenameMatches: [(score: Double, url: URL)] = []
+        if _searchFilenames {
+            let queryLower = query.lowercased()
+            let terms = queryLower.split(separator: " ").map(String.init)
+            // Check all indexed docs via FTS index URLs
+            if let allResults = ftsIndex.search(text: "*") {
+                for url in allResults {
+                    let path = url.path
+                    guard scoreMap[path] == nil else { continue }
+                    let name = url.lastPathComponent.lowercased()
+                    if terms.contains(where: { name.contains($0) }) {
+                        filenameMatches.append((score: 0.3, url: url))
+                    }
+                }
+            }
+        }
+        let combined = Array(sorted) + filenameMatches.prefix(effectiveLimit / 3)
+
+        return combined.prefix(effectiveLimit).map { item in
             let path = item.url.path
             let fileName = item.url.lastPathComponent
             let content = (try? extractText(from: item.url)) ?? ""
+            let snippet: String
+            if item.score <= 0.3 && _searchFilenames {
+                snippet = "文件名匹配: \(fileName)"
+            } else {
+                snippet = extractSnippet(path: path, query: query)
+            }
             return SearchResult(
                 id: path,
                 filePath: path,
                 fileName: fileName,
                 title: fileName,
                 author: "",
-                snippet: extractSnippet(path: path, query: query),
+                snippet: snippet,
                 content: content,
                 fileSize: fileSize(at: path),
                 lastModified: nil

@@ -32,21 +32,23 @@ struct ContentView: View {
                         .onSubmit(performSearch)
                     if isSearching { ProgressView().controlSize(.small) }
                     if !searchText.isEmpty {
-                        Button { searchText = ""; results = [] } label: {
+                        Button { searchText = ""; results = []; searchFieldFocused = true } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(.plain).focusable(false)
                     }
                     Button { performSearch() } label: {
                         Image(systemName: "arrow.right.circle.fill")
                             .font(.title3)
                     }
                     .buttonStyle(.plain)
+                    .focusable(false)
                     .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching)
-                    Button { QuickSearchPanelController.shared.toggle() } label: {
+                    Button { QuickSearchPanelController.shared.toggle(); searchFieldFocused = true } label: {
                         Image(systemName: "rectangle.and.text.magnifyingglass")
                             .font(.callout)
                     }
                     .buttonStyle(.plain)
+                    .focusable(false)
                     .help("快速搜索面板")
                 }
                 .padding(10)
@@ -118,6 +120,11 @@ struct ContentView: View {
         .navigationSplitViewStyle(.balanced)
         .sheet(isPresented: $showCompendium) { CompendiumView().environmentObject(dataManager) }
         .sheet(isPresented: $showHistory) { HistoryView(onSelect: { q in searchText = q; showHistory = false; performSearch() }).environmentObject(dataManager) }
+        .background {
+            Button("") { GlobalSearchPopupController.shared.toggle() }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .hidden()
+        }
         .task { await indexManager.startup() }
         .onAppear { searchFieldFocused = true }
         .onChange(of: showHistory) { _, newValue in

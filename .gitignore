@@ -1,3 +1,4 @@
 solr/
 .build/
 .swiftpm/
+dist/

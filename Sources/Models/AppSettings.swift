@@ -14,6 +14,7 @@ class AppSettings: ObservableObject, @preconcurrency Codable {
     @Published var defaultPreviewMode: String = "live"
     @Published var historyMaxItems: Int = 100
     @Published var excludedExtensions: [String] = []
+    @Published var searchFilenames: Bool = true
 
     private static var filePath: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -25,7 +26,7 @@ class AppSettings: ObservableObject, @preconcurrency Codable {
     enum CodingKeys: String, CodingKey {
         case searchResultLimit, searchEngineWeightSK, searchEngineWeightFTS
         case httpPort, httpAutoStart, mcpPort, mcpAutoStart
-        case defaultPreviewMode, historyMaxItems, excludedExtensions
+        case defaultPreviewMode, historyMaxItems, excludedExtensions, searchFilenames
     }
 
     init() { load() }
@@ -42,6 +43,7 @@ class AppSettings: ObservableObject, @preconcurrency Codable {
         defaultPreviewMode = (try? c.decode(String.self, forKey: .defaultPreviewMode)) ?? "live"
         historyMaxItems = (try? c.decode(Int.self, forKey: .historyMaxItems)) ?? 100
         excludedExtensions = (try? c.decode([String].self, forKey: .excludedExtensions)) ?? []
+        searchFilenames = (try? c.decode(Bool.self, forKey: .searchFilenames)) ?? true
     }
 
     func encode(to encoder: Encoder) throws {
@@ -56,6 +58,7 @@ class AppSettings: ObservableObject, @preconcurrency Codable {
         try c.encode(defaultPreviewMode, forKey: .defaultPreviewMode)
         try c.encode(historyMaxItems, forKey: .historyMaxItems)
         try c.encode(excludedExtensions, forKey: .excludedExtensions)
+        try c.encode(searchFilenames, forKey: .searchFilenames)
     }
 
     func save() {
@@ -75,5 +78,6 @@ class AppSettings: ObservableObject, @preconcurrency Codable {
         defaultPreviewMode = decoded.defaultPreviewMode
         historyMaxItems = decoded.historyMaxItems
         excludedExtensions = decoded.excludedExtensions
+        searchFilenames = decoded.searchFilenames
     }
 }

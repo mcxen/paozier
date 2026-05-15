@@ -5,7 +5,12 @@ struct PaozierApp: App {
     @StateObject private var indexManager = IndexManager()
 
     init() {
-        GlobalSearchPopupController.shared.registerHotkey()
+        // Ensure app activates as regular GUI app when launched from .app bundle
+        NSApplication.shared.setActivationPolicy(.regular)
+        // Defer hotkey registration until after run loop is established
+        DispatchQueue.main.async {
+            GlobalSearchPopupController.shared.registerHotkey()
+        }
     }
 
     var body: some Scene {
