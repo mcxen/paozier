@@ -1,7 +1,7 @@
 import Foundation
 
 @MainActor
-class AppSettings: ObservableObject, @preconcurrency Codable {
+class AppSettings: ObservableObject, Codable {
     static let shared = AppSettings()
 
     @Published var searchResultLimit: Int = 30
