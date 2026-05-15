@@ -1,0 +1,23 @@
+{
+  "pins" : [
+    {
+      "identity" : "dfsearchkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/dagronf/DFSearchKit.git",
+      "state" : {
+        "revision" : "ba6aa87ec39f9de144dd1b031a3568c26531fd36",
+        "version" : "1.5.0"
+      }
+    },
+    {
+      "identity" : "dsffulltextsearchindex",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/dagronf/DSFFullTextSearchIndex.git",
+      "state" : {
+        "revision" : "ec34a73b0edbfa86da56ed3995af509ebcc848ac",
+        "version" : "1.1.0"
+      }
+    }
+  ],
+  "version" : 2
+}

@@ -2,12 +2,12 @@ import SwiftUI
 
 @main
 struct PaozierApp: App {
-    @StateObject private var solrManager = SolrManager()
+    @StateObject private var indexManager = IndexManager()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(solrManager)
+                .environmentObject(indexManager)
                 .frame(minWidth: 900, minHeight: 600)
         }
         .windowStyle(.titleBar)
