@@ -5,7 +5,10 @@ struct SearchResultsView: View {
     @Binding var results: [SearchResult]
     @Binding var selectedResult: SearchResult?
     @Binding var isSearching: Bool
+    let searchError: String?
     var onSearch: () -> Void
+
+    @FocusState private var searchFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,7 +20,9 @@ struct SearchResultsView: View {
                 TextField("搜索文档内容...", text: $searchText)
                     .textFieldStyle(.roundedBorder)
                     .font(.body)
-                    .onSubmit(onSearch)
+                    .focused($searchFieldFocused)
+                    .submitLabel(.search)
+                    .onSubmit { runSearchIfReady() }
                 if isSearching {
                     ProgressView()
                         .controlSize(.small)
@@ -32,6 +37,17 @@ struct SearchResultsView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                Button {
+                    runSearchIfReady()
+                } label: {
+                    Label("搜索", systemImage: "arrow.right.circle.fill")
+                        .labelStyle(.iconOnly)
+                        .font(.title3)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.secondary.opacity(0.45) : Color.blue)
+                .help("搜索")
+                .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -54,7 +70,28 @@ struct SearchResultsView: View {
             }
 
             // Results list
-            if results.isEmpty && !isSearching {
+            if isSearching && results.isEmpty {
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.regular)
+                    Text("正在搜索...")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let searchError {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 36, weight: .thin))
+                        .foregroundStyle(.orange)
+                    Text(searchError)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if results.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: searchText.isEmpty ? "text.magnifyingglass" : "doc.questionmark")
                         .font(.system(size: 40, weight: .thin))
@@ -78,6 +115,14 @@ struct SearchResultsView: View {
             }
         }
         .frame(minWidth: 320)
+        .onAppear {
+            searchFieldFocused = true
+        }
+    }
+
+    private func runSearchIfReady() {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        onSearch()
     }
 }
 

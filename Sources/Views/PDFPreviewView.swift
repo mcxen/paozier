@@ -1,5 +1,6 @@
 import SwiftUI
 import PDFKit
+import QuickLookUI
 
 struct PDFPreviewView: View {
     let filePath: String
@@ -13,10 +14,14 @@ struct PDFPreviewView: View {
     }
 
     var body: some View {
+        let url = URL(fileURLWithPath: filePath)
         if isTextFile {
             TextFilePreview(filePath: filePath)
-        } else if let doc = PDFDocument(url: URL(fileURLWithPath: filePath)) {
+        } else if fileExtension == "pdf", let doc = PDFDocument(url: url) {
             PDFKitView(document: doc)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if FileManager.default.fileExists(atPath: filePath) {
+            QuickLookPreview(fileURL: url)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 8) {
@@ -39,7 +44,13 @@ struct TextFilePreview: View {
     let filePath: String
 
     private var content: String {
-        (try? String(contentsOfFile: filePath, encoding: .utf8)) ?? "无法读取文件内容"
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: filePath)) else { return "无法读取文件内容" }
+        for encoding in [String.Encoding.utf8, .unicode, .utf16LittleEndian, .utf16BigEndian, .isoLatin1, .windowsCP1252] {
+            if let text = String(data: data, encoding: encoding) {
+                return text
+            }
+        }
+        return "无法识别文本编码"
     }
 
     var body: some View {
@@ -51,6 +62,30 @@ struct TextFilePreview: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+final class PreviewItem: NSObject, QLPreviewItem {
+    let previewItemURL: URL?
+
+    init(url: URL) {
+        previewItemURL = url
+    }
+}
+
+struct QuickLookPreview: NSViewRepresentable {
+    let fileURL: URL
+
+    func makeNSView(context: Context) -> QLPreviewView {
+        let view = QLPreviewView(frame: .zero, style: .normal)!
+        view.previewItem = PreviewItem(url: fileURL)
+        view.autostarts = true
+        return view
+    }
+
+    func updateNSView(_ nsView: QLPreviewView, context: Context) {
+        nsView.previewItem = PreviewItem(url: fileURL)
+        nsView.refreshPreviewItem()
     }
 }
 

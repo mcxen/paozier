@@ -46,17 +46,20 @@ struct SidebarView: View {
                         }
                         Spacer()
                         Button {
-                            if solrManager.isRunning {
-                                solrManager.stopSolr()
-                            } else {
-                                Task { await solrManager.startSolr() }
+                            Task {
+                                if solrManager.isRunning {
+                                    await solrManager.stopSolr()
+                                } else {
+                                    await solrManager.startSolr()
+                                }
                             }
                         } label: {
-                            Image(systemName: solrManager.isRunning ? "stop.circle" : "play.circle.fill")
+                            Image(systemName: solrManager.isEngineBusy ? "hourglass" : (solrManager.isRunning ? "stop.circle" : "play.circle.fill"))
                                 .font(.title3)
                                 .foregroundStyle(solrManager.isRunning ? .red : .blue)
                         }
                         .buttonStyle(.plain)
+                        .disabled(solrManager.isEngineBusy)
                     }
                     .padding(.vertical, 4)
                 } header: {
@@ -68,29 +71,36 @@ struct SidebarView: View {
                 // Indexed folders
                 Section {
                     ForEach(solrManager.indexedFolders) { folder in
-                        HStack(spacing: 10) {
-                            Image(systemName: "folder.fill")
-                                .foregroundStyle(.blue.opacity(0.7))
-                                .font(.callout)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(URL(fileURLWithPath: folder.path).lastPathComponent)
+                        Button {
+                            solrManager.selectedFolder = folder
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "folder.fill")
+                                    .foregroundStyle(.blue.opacity(0.7))
                                     .font(.callout)
-                                    .lineLimit(1)
-                                HStack(spacing: 6) {
-                                    Text("\(folder.fileCount) 文件")
-                                        .font(.caption2)
-                                    if let date = folder.lastIndexed {
-                                        Text("·")
-                                        Text(date, style: .relative)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(URL(fileURLWithPath: folder.path).lastPathComponent)
+                                        .font(.callout)
+                                        .lineLimit(1)
+                                    HStack(spacing: 6) {
+                                        Text("\(folder.fileCount) 文件")
                                             .font(.caption2)
+                                        if let date = folder.lastIndexed {
+                                            Text("·")
+                                            Text(date, style: .relative)
+                                                .font(.caption2)
+                                        }
                                     }
+                                    .foregroundStyle(.tertiary)
                                 }
-                                .foregroundStyle(.tertiary)
                             }
                         }
+                        .buttonStyle(.plain)
                         .padding(.vertical, 2)
                         .contextMenu {
+                            Button("查看内容") { solrManager.selectedFolder = folder }
                             Button("重新索引") { Task { await solrManager.indexFolder(folder) } }
+                            Button("刷新文件数量") { solrManager.refreshFolderCounts() }
                             Button("在 Finder 中显示") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder.path) }
                         }
                     }
@@ -141,5 +151,8 @@ struct SidebarView: View {
             .listStyle(.sidebar)
         }
         .frame(minWidth: 220, idealWidth: 250)
+        .task {
+            await solrManager.refreshStatus()
+        }
     }
 }

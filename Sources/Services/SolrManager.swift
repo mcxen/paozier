@@ -6,8 +6,10 @@ import Combine
 class SolrManager: ObservableObject {
     @Published var isRunning = false
     @Published var isIndexing = false
+    @Published var isEngineBusy = false
     @Published var indexProgress: Double = 0
     @Published var indexedFolders: [IndexedFolder] = []
+    @Published var selectedFolder: IndexedFolder?
     @Published var totalDocs: Int = 0
     @Published var statusMessage = "就绪"
 
@@ -28,15 +30,25 @@ class SolrManager: ObservableObject {
         solrHome = dataDir.appendingPathComponent("solr", isDirectory: true)
         try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
         loadFolders()
+        refreshFolderCounts()
     }
 
     var solrBaseURL: String { "http://localhost:\(solrPort)/solr/paozier" }
 
     func startSolr() async {
+        guard !isEngineBusy else { return }
         guard !isRunning else { return }
+        isEngineBusy = true
+        defer { isEngineBusy = false }
         statusMessage = "启动 Solr..."
 
-        // Check if Solr is already running (e.g. started manually)
+        guard let solrDir = findSolrDirectory() else {
+            statusMessage = "Solr 未找到，请运行 scripts/setup-solr.sh"
+            return
+        }
+
+        ensureCoreConfig(from: solrDir)
+
         if await checkHealth() {
             isRunning = true
             statusMessage = "Solr 运行中"
@@ -44,38 +56,13 @@ class SolrManager: ObservableObject {
             return
         }
 
-        // Find Solr: try bundle first, then working directory, then relative to executable
-        let candidates = [
-            Bundle.main.resourceURL?.appendingPathComponent("solr"),
-            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("solr"),
-            URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("solr")
-        ].compactMap { $0 }
-
-        guard let solrDir = candidates.first(where: { FileManager.default.fileExists(atPath: $0.appendingPathComponent("bin/solr").path) }) else {
-            statusMessage = "Solr 未找到，请运行 scripts/setup-solr.sh"
+        if await solrServerResponds() {
+            isRunning = false
+            statusMessage = "8983 端口已有 Solr，但 paozier core 不可用；请停止旧 Solr 后重试"
             return
         }
 
         let binPath = solrDir.appendingPathComponent("bin/solr").path
-
-        // Ensure core config exists in app data solrHome
-        let coreDir = solrHome.appendingPathComponent("paozier")
-        let confDir = coreDir.appendingPathComponent("conf")
-        try? FileManager.default.createDirectory(at: confDir, withIntermediateDirectories: true)
-
-        let corePropFile = coreDir.appendingPathComponent("core.properties")
-        if !FileManager.default.fileExists(atPath: corePropFile.path) {
-            try? "name=paozier".write(to: corePropFile, atomically: true, encoding: .utf8)
-        }
-        // Copy config from bundle/project
-        let srcConf = solrDir.appendingPathComponent("server/solr/paozier/conf")
-        for file in ["schema.xml", "solrconfig.xml"] {
-            let src = srcConf.appendingPathComponent(file)
-            let dst = confDir.appendingPathComponent(file)
-            if FileManager.default.fileExists(atPath: src.path) && !FileManager.default.fileExists(atPath: dst.path) {
-                try? FileManager.default.copyItem(at: src, to: dst)
-            }
-        }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binPath)
@@ -86,6 +73,10 @@ class SolrManager: ObservableObject {
             return env
         }()
         process.currentDirectoryURL = solrDir
+        let output = Pipe()
+        let error = Pipe()
+        process.standardOutput = output
+        process.standardError = error
 
         solrProcess = process
         do {
@@ -100,17 +91,39 @@ class SolrManager: ObservableObject {
                     return
                 }
             }
-            statusMessage = "Solr 启动超时"
+            let stderr = String(data: error.fileHandleForReading.availableData, encoding: .utf8) ?? ""
+            statusMessage = stderr.isEmpty ? "Solr 启动超时" : "Solr 启动失败: \(stderr.prefix(120))"
         } catch {
             statusMessage = "启动失败: \(error.localizedDescription)"
         }
     }
 
-    func stopSolr() {
+    func stopSolr() async {
+        guard !isEngineBusy else { return }
+        isEngineBusy = true
+        statusMessage = "停止 Solr..."
+
         solrProcess?.terminate()
         solrProcess = nil
-        isRunning = false
-        statusMessage = "已停止"
+
+        if let solrDir = findSolrDirectory() {
+            _ = try? await runSolrCommand(arguments: ["stop", "-p", "\(solrPort)"], in: solrDir)
+        }
+
+        for _ in 0..<10 {
+            if !(await solrServerResponds()) {
+                isRunning = false
+                totalDocs = 0
+                statusMessage = "已停止"
+                isEngineBusy = false
+                return
+            }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+
+        isRunning = await checkHealth()
+        statusMessage = isRunning ? "停止失败：Solr 仍在运行" : "已停止"
+        isEngineBusy = false
     }
 
     func addFolder() {
@@ -119,7 +132,8 @@ class SolrManager: ObservableObject {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            let folder = IndexedFolder(path: url.path)
+            var folder = IndexedFolder(path: url.path)
+            folder.fileCount = findIndexableFiles(in: url).count
             indexedFolders.append(folder)
             saveFolders()
             Task { await indexFolder(folder) }
@@ -127,16 +141,22 @@ class SolrManager: ObservableObject {
     }
 
     func indexFolder(_ folder: IndexedFolder) async {
-        guard isRunning else {
-            statusMessage = "请先启动 Solr"
+        let healthy = await checkHealth()
+        if !isRunning || !healthy {
+            await startSolr()
+        }
+
+        guard await checkHealth() else {
+            statusMessage = "Solr 未就绪，无法索引"
             return
         }
+
         isIndexing = true
         indexProgress = 0
         statusMessage = "扫描文件..."
 
         let folderURL = URL(fileURLWithPath: folder.path)
-        let files = findPDFs(in: folderURL)
+        let files = findIndexableFiles(in: folderURL)
         let total = files.count
 
         if total == 0 {
@@ -146,19 +166,21 @@ class SolrManager: ObservableObject {
         }
 
         statusMessage = "索引中 (0/\(total))..."
+        var failed = 0
+        try? await SolrService.shared.deleteFolder(path: folder.path)
         for (i, file) in files.enumerated() {
             do {
-                try await SolrService.shared.indexPDF(at: file)
+                try await SolrService.shared.indexFile(at: file)
             } catch {
-                // Skip failed files
+                failed += 1
             }
             indexProgress = Double(i + 1) / Double(max(total, 1))
-            statusMessage = "索引中 (\(i + 1)/\(total))..."
+            statusMessage = failed == 0 ? "索引中 (\(i + 1)/\(total))..." : "索引中 (\(i + 1)/\(total))，失败 \(failed) 个"
         }
 
         // Update folder info
         if let idx = indexedFolders.firstIndex(where: { $0.id == folder.id }) {
-            indexedFolders[idx].fileCount = total
+            indexedFolders[idx].fileCount = files.count
             indexedFolders[idx].lastIndexed = Date()
             saveFolders()
         }
@@ -166,7 +188,7 @@ class SolrManager: ObservableObject {
         try? await SolrService.shared.commit()
         await refreshDocCount()
         isIndexing = false
-        statusMessage = "索引完成 (\(total) 个文件)"
+        statusMessage = failed == 0 ? "索引完成 (\(total) 个文件)" : "索引完成，成功 \(total - failed)，失败 \(failed)"
     }
 
     func reindexAll() async {
@@ -175,28 +197,148 @@ class SolrManager: ObservableObject {
         }
     }
 
+    func refreshStatus() async {
+        isRunning = await checkHealth()
+        if isRunning {
+            statusMessage = "Solr 运行中"
+            await refreshDocCount()
+        } else {
+            totalDocs = 0
+            statusMessage = await solrServerResponds() ? "Solr 已启动，但 paozier core 不可用" : "已停止"
+        }
+        refreshFolderCounts()
+    }
+
+    func refreshFolderCounts() {
+        var changed = false
+        for idx in indexedFolders.indices {
+            let count = findIndexableFiles(in: URL(fileURLWithPath: indexedFolders[idx].path)).count
+            if indexedFolders[idx].fileCount != count {
+                indexedFolders[idx].fileCount = count
+                changed = true
+            }
+        }
+        if changed {
+            saveFolders()
+        }
+    }
+
     private func refreshDocCount() async {
         totalDocs = (try? await SolrService.shared.docCount()) ?? 0
     }
 
     private func checkHealth() async -> Bool {
-        guard let url = URL(string: "\(solrBaseURL)/admin/ping") else { return false }
+        guard var components = URLComponents(string: "\(solrBaseURL)/select") else { return false }
+        components.queryItems = [
+            URLQueryItem(name: "q", value: "*:*"),
+            URLQueryItem(name: "rows", value: "0"),
+            URLQueryItem(name: "wt", value: "json")
+        ]
+        guard let url = components.url else { return false }
         do {
             let (_, response) = try await URLSession.shared.data(from: url)
             return (response as? HTTPURLResponse)?.statusCode == 200
         } catch { return false }
     }
 
-    private func findPDFs(in directory: URL) -> [URL] {
+    private func solrServerResponds() async -> Bool {
+        guard let url = URL(string: "http://localhost:\(solrPort)/solr/admin/info/system?wt=json") else { return false }
+        do {
+            let (_, response) = try await URLSession.shared.data(from: url)
+            return (response as? HTTPURLResponse)?.statusCode == 200
+        } catch { return false }
+    }
+
+    private func findSolrDirectory() -> URL? {
+        let execPath = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        let candidates = [
+            // App bundle: Paozier.app/Contents/Resources/solr
+            execPath.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Resources/solr"),
+            // Bundle API
+            Bundle.main.resourceURL?.appendingPathComponent("solr"),
+            // Working directory (swift run)
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("solr"),
+            // Relative to .build/debug/Paozier
+            execPath.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("solr")
+        ].compactMap { $0 }
+
+        return candidates.first { FileManager.default.fileExists(atPath: $0.appendingPathComponent("bin/solr").path) }
+    }
+
+    private func runSolrCommand(arguments: [String], in solrDir: URL) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            let process = Process()
+            process.executableURL = solrDir.appendingPathComponent("bin/solr")
+            process.arguments = arguments
+            process.currentDirectoryURL = solrDir
+            process.environment = {
+                var env = ProcessInfo.processInfo.environment
+                env["SOLR_SECURITY_MANAGER_ENABLED"] = "false"
+                return env
+            }()
+
+            let output = Pipe()
+            let error = Pipe()
+            process.standardOutput = output
+            process.standardError = error
+            process.terminationHandler = { process in
+                let out = output.fileHandleForReading.readDataToEndOfFile()
+                let err = error.fileHandleForReading.readDataToEndOfFile()
+                let text = (String(data: out, encoding: .utf8) ?? "") + (String(data: err, encoding: .utf8) ?? "")
+                if process.terminationStatus == 0 {
+                    continuation.resume(returning: text)
+                } else {
+                    continuation.resume(throwing: SolrError.commandFailed(text))
+                }
+            }
+
+            do {
+                try process.run()
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+
+    private func ensureCoreConfig(from solrDir: URL) {
+        // Ensure solr.xml exists in solrHome
+        let solrXml = solrHome.appendingPathComponent("solr.xml")
+        if !FileManager.default.fileExists(atPath: solrXml.path) {
+            try? FileManager.default.createDirectory(at: solrHome, withIntermediateDirectories: true)
+            try? "<solr></solr>".write(to: solrXml, atomically: true, encoding: .utf8)
+        }
+
+        let coreDir = solrHome.appendingPathComponent("paozier")
+        let confDir = coreDir.appendingPathComponent("conf")
+        try? FileManager.default.createDirectory(at: confDir, withIntermediateDirectories: true)
+
+        let corePropFile = coreDir.appendingPathComponent("core.properties")
+        try? "name=paozier\n".write(to: corePropFile, atomically: true, encoding: .utf8)
+
+        let srcConf = solrDir.appendingPathComponent("server/solr/paozier/conf")
+        for file in ["schema.xml", "solrconfig.xml"] {
+            let src = srcConf.appendingPathComponent(file)
+            let dst = confDir.appendingPathComponent(file)
+            guard FileManager.default.fileExists(atPath: src.path) else { continue }
+            if FileManager.default.fileExists(atPath: dst.path) {
+                try? FileManager.default.removeItem(at: dst)
+            }
+            try? FileManager.default.copyItem(at: src, to: dst)
+        }
+    }
+
+    private func findIndexableFiles(in directory: URL) -> [URL] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return [] }
         var files: [URL] = []
         for case let fileURL as URL in enumerator {
+            let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            guard values?.isRegularFile == true else { continue }
             if Self.supportedExtensions.contains(fileURL.pathExtension.lowercased()) {
                 files.append(fileURL)
             }
         }
-        return files
+        return files.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 
     private var foldersFile: URL { dataDir.appendingPathComponent("folders.json") }

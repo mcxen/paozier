@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var results: [SearchResult] = []
     @State private var selectedResult: SearchResult?
     @State private var isSearching = false
+    @State private var searchError: String?
     // Proximity
     @State private var proximityActive = false
     @State private var proxTerm1 = ""
@@ -37,6 +38,7 @@ struct ContentView: View {
                     results: $results,
                     selectedResult: $selectedResult,
                     isSearching: $isSearching,
+                    searchError: searchError,
                     onSearch: performSearch
                 )
 
@@ -73,7 +75,7 @@ struct ContentView: View {
                             Label("Live Preview", systemImage: "text.magnifyingglass").font(.caption).frame(maxWidth: .infinity)
                         }.buttonStyle(.bordered).tint(previewMode == .live ? .blue : .gray).controlSize(.small)
                         Button { previewMode = .pdf } label: {
-                            Label("PDF", systemImage: "doc.richtext").font(.caption).frame(maxWidth: .infinity)
+                            Label("文件预览", systemImage: "doc.richtext").font(.caption).frame(maxWidth: .infinity)
                         }.buttonStyle(.bordered).tint(previewMode == .pdf ? .blue : .gray).controlSize(.small)
 
                         Spacer()
@@ -84,6 +86,7 @@ struct ContentView: View {
                             Button("导出高亮文档") { dataManager.exportHighlighted(result: result, terms: searchTerms) }
                             Button("收藏搜索") { dataManager.addBookmark(name: searchText, query: searchText) }
                             Divider()
+                            Button("打开文件") { NSWorkspace.shared.open(URL(fileURLWithPath: result.filePath)) }
                             Button("在 Finder 中显示") { NSWorkspace.shared.selectFile(result.filePath, inFileViewerRootedAtPath: "") }
                         } label: {
                             Image(systemName: "ellipsis.circle")
@@ -101,6 +104,8 @@ struct ContentView: View {
                         PDFPreviewView(filePath: result.filePath)
                     }
                 }
+            } else if let folder = solrManager.selectedFolder {
+                FolderContentView(folder: folder)
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "doc.text.below.ecg")
@@ -118,6 +123,9 @@ struct ContentView: View {
         .sheet(isPresented: $showCompendium) { CompendiumView() }
         .sheet(isPresented: $showHistory) { HistoryView(onSelect: { query in searchText = query; showHistory = false; performSearch() }) }
         .task { await solrManager.startSolr() }
+        .onChange(of: solrManager.selectedFolder?.id) { _, _ in
+            selectedResult = nil
+        }
         .environmentObject(dataManager)
     }
 
@@ -125,12 +133,25 @@ struct ContentView: View {
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return }
         isSearching = true
+        searchError = nil
         Task {
-            let items = try? await SolrService.shared.search(query: q, useRegex: useRegex)
+            let result: Result<[SearchResult], Error>
+            do {
+                result = .success(try await SolrService.shared.search(query: q, useRegex: useRegex))
+            } catch {
+                result = .failure(error)
+            }
             await MainActor.run {
-                results = items ?? []
+                switch result {
+                case .success(let items):
+                    results = items
+                    selectedResult = items.first
+                    dataManager.addHistory(query: q, resultCount: results.count)
+                case .failure(let error):
+                    results = []
+                    searchError = "搜索失败：\(error.localizedDescription)"
+                }
                 isSearching = false
-                dataManager.addHistory(query: q, resultCount: results.count)
             }
         }
     }
@@ -138,13 +159,26 @@ struct ContentView: View {
     private func performProximitySearch() {
         guard !proxTerm1.isEmpty, !proxTerm2.isEmpty else { return }
         isSearching = true
+        searchError = nil
         searchText = "\(proxTerm1) \(proxTerm2)"
         Task {
-            let items = try? await SolrService.shared.search(query: "\(proxTerm1) \(proxTerm2)", proximity: Int(proxDistance))
+            let result: Result<[SearchResult], Error>
+            do {
+                result = .success(try await SolrService.shared.search(query: "\(proxTerm1) \(proxTerm2)", proximity: Int(proxDistance)))
+            } catch {
+                result = .failure(error)
+            }
             await MainActor.run {
-                results = items ?? []
+                switch result {
+                case .success(let items):
+                    results = items
+                    selectedResult = items.first
+                    dataManager.addHistory(query: searchText, resultCount: results.count)
+                case .failure(let error):
+                    results = []
+                    searchError = "搜索失败：\(error.localizedDescription)"
+                }
                 isSearching = false
-                dataManager.addHistory(query: searchText, resultCount: results.count)
             }
         }
     }
