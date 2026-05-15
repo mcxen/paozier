@@ -36,15 +36,27 @@ class SolrManager: ObservableObject {
         guard !isRunning else { return }
         statusMessage = "启动 Solr..."
 
-        // Solr binary: bundled in app or project root
-        let solrDir = Bundle.main.resourceURL?.appendingPathComponent("solr")
-            ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("solr")
+        // Check if Solr is already running (e.g. started manually)
+        if await checkHealth() {
+            isRunning = true
+            statusMessage = "Solr 运行中"
+            await refreshDocCount()
+            return
+        }
 
-        let binPath = solrDir.appendingPathComponent("bin/solr").path
-        guard FileManager.default.fileExists(atPath: binPath) else {
+        // Find Solr: try bundle first, then working directory, then relative to executable
+        let candidates = [
+            Bundle.main.resourceURL?.appendingPathComponent("solr"),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("solr"),
+            URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("solr")
+        ].compactMap { $0 }
+
+        guard let solrDir = candidates.first(where: { FileManager.default.fileExists(atPath: $0.appendingPathComponent("bin/solr").path) }) else {
             statusMessage = "Solr 未找到，请运行 scripts/setup-solr.sh"
             return
         }
+
+        let binPath = solrDir.appendingPathComponent("bin/solr").path
 
         // Ensure core config exists in app data solrHome
         let coreDir = solrHome.appendingPathComponent("paozier")
@@ -121,14 +133,20 @@ class SolrManager: ObservableObject {
         }
         isIndexing = true
         indexProgress = 0
-        statusMessage = "扫描 PDF 文件..."
+        statusMessage = "扫描文件..."
 
         let folderURL = URL(fileURLWithPath: folder.path)
-        let pdfFiles = findPDFs(in: folderURL)
-        let total = pdfFiles.count
+        let files = findPDFs(in: folderURL)
+        let total = files.count
+
+        if total == 0 {
+            statusMessage = "未找到支持的文件"
+            isIndexing = false
+            return
+        }
 
         statusMessage = "索引中 (0/\(total))..."
-        for (i, file) in pdfFiles.enumerated() {
+        for (i, file) in files.enumerated() {
             do {
                 try await SolrService.shared.indexPDF(at: file)
             } catch {

@@ -87,6 +87,7 @@ actor SolrService {
         case "odt": return "application/vnd.oasis.opendocument.text"
         case "ods": return "application/vnd.oasis.opendocument.spreadsheet"
         case "odp": return "application/vnd.oasis.opendocument.presentation"
+        case "md", "markdown": return "text/markdown"
         default: return "text/plain"
         }
     }

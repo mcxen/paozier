@@ -15,7 +15,7 @@ struct SearchResultsView: View {
                     .foregroundStyle(.secondary)
                     .font(.callout)
                 TextField("搜索文档内容...", text: $searchText)
-                    .textFieldStyle(.plain)
+                    .textFieldStyle(.roundedBorder)
                     .font(.body)
                     .onSubmit(onSearch)
                 if isSearching {
