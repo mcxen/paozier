@@ -1,0 +1,114 @@
+name: Release DMG
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example 1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release DMG
+    runs-on: macos-14
+
+    env:
+      APP_NAME: Paozier
+      BUNDLE_ID: com.openspring.paozier
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ inputs.version }}"
+            TAG="v${VERSION#v}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Release Binary
+        run: swift build -c release --arch arm64 --arch x86_64
+
+      - name: Package App Bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_PATH="dist/${APP_NAME}.app"
+          CONTENTS_PATH="${APP_PATH}/Contents"
+          MACOS_PATH="${CONTENTS_PATH}/MacOS"
+
+          rm -rf dist
+          mkdir -p "${MACOS_PATH}"
+          cp ".build/apple/Products/Release/${APP_NAME}" "${MACOS_PATH}/${APP_NAME}"
+          chmod +x "${MACOS_PATH}/${APP_NAME}"
+
+          cat > "${CONTENTS_PATH}/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>${APP_NAME}</string>
+            <key>CFBundleIdentifier</key>
+            <string>${BUNDLE_ID}</string>
+            <key>CFBundleName</key>
+            <string>${APP_NAME}</string>
+            <key>CFBundleDisplayName</key>
+            <string>${APP_NAME}</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${{ steps.version.outputs.version }}</string>
+            <key>CFBundleVersion</key>
+            <string>${{ github.run_number }}</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>14.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Create DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DMG_NAME="${APP_NAME}-${{ steps.version.outputs.version }}.dmg"
+          DMG_ROOT="dist/dmg-root"
+
+          mkdir -p "${DMG_ROOT}"
+          cp -R "dist/${APP_NAME}.app" "${DMG_ROOT}/"
+          ln -s /Applications "${DMG_ROOT}/Applications"
+
+          hdiutil create \
+            -volname "${APP_NAME}" \
+            -srcfolder "${DMG_ROOT}" \
+            -ov \
+            -format UDZO \
+            "dist/${DMG_NAME}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Paozier ${{ steps.version.outputs.version }}
+          files: dist/Paozier-${{ steps.version.outputs.version }}.dmg
+          generate_release_notes: true
