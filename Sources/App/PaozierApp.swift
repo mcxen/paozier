@@ -4,6 +4,10 @@ import SwiftUI
 struct PaozierApp: App {
     @StateObject private var indexManager = IndexManager()
 
+    init() {
+        GlobalSearchPopupController.shared.registerHotkey()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

@@ -100,39 +100,65 @@ class HTTPServer {
     <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Paozier Search</title>
     <style>
+    :root{--bg:#f8fafc;--surface:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--faint:#94a3b8;--accent:#3b82f6;--accent-bg:rgba(59,130,246,.08);--shadow:0 1px 3px rgba(0,0,0,.06);--radius:.75rem}
+    @media(prefers-color-scheme:dark){:root{--bg:#0f172a;--surface:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--faint:#475569;--accent:#60a5fa;--accent-bg:rgba(96,165,250,.1);--shadow:0 1px 3px rgba(0,0,0,.3)}}
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:-apple-system,system-ui,sans-serif;background:#f8fafc;color:#1e293b;padding:2rem}
-    .container{max-width:720px;margin:0 auto}
-    h1{font-size:1.5rem;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
-    .search-box{display:flex;gap:.5rem;margin-bottom:1.5rem}
-    input{flex:1;padding:.6rem .8rem;border:1px solid #e2e8f0;border-radius:.5rem;font-size:.9rem;outline:none}
-    input:focus{border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,.15)}
-    button{padding:.6rem 1.2rem;background:#0f172a;color:#fff;border:none;border-radius:.5rem;cursor:pointer;font-size:.9rem}
-    button:hover{background:#1e293b}
-    .result{border:1px solid #e2e8f0;border-radius:.5rem;padding:.8rem;margin-bottom:.6rem;background:#fff}
-    .result h3{font-size:.9rem;margin-bottom:.3rem}
-    .result p{font-size:.8rem;color:#64748b;line-height:1.4}
-    .result small{font-size:.7rem;color:#94a3b8}
-    .empty{text-align:center;color:#94a3b8;padding:3rem 0}
-    .count{font-size:.8rem;color:#64748b;margin-bottom:.8rem}
+    body{font-family:-apple-system,system-ui,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
+    .header{position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:1px solid var(--border);padding:clamp(.75rem,2vw,1.25rem) clamp(1rem,4vw,2rem)}
+    .brand{font-size:clamp(1.1rem,3vw,1.4rem);font-weight:700;display:flex;align-items:center;gap:.4rem;margin-bottom:clamp(.5rem,1.5vw,.75rem)}
+    .search-box{display:flex;gap:.5rem}
+    input{flex:1;min-height:44px;padding:.6rem 1rem;border:1.5px solid var(--border);border-radius:var(--radius);font-size:clamp(.9rem,2.5vw,1rem);background:var(--surface);color:var(--text);outline:none;transition:border-color .2s,box-shadow .2s}
+    input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}
+    input::placeholder{color:var(--faint)}
+    button{min-height:44px;min-width:44px;padding:.6rem 1.2rem;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);cursor:pointer;font-size:clamp(.85rem,2.5vw,.95rem);font-weight:600;transition:transform .1s,opacity .2s}
+    button:hover{opacity:.9}
+    button:active{transform:scale(.96)}
+    .main{flex:1;padding:clamp(.75rem,3vw,1.5rem) clamp(1rem,4vw,2rem);max-width:860px;width:100%;margin:0 auto}
+    .count{font-size:clamp(.75rem,2vw,.85rem);color:var(--muted);margin-bottom:.75rem;opacity:0;transition:opacity .3s}
+    .count.show{opacity:1}
+    .results{display:grid;gap:.6rem}
+    .result{border:1px solid var(--border);border-radius:var(--radius);padding:clamp(.7rem,2vw,1rem);background:var(--surface);box-shadow:var(--shadow);transition:transform .15s,box-shadow .15s;animation:fadeUp .25s ease both}
+    .result:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.08)}
+    @media(prefers-color-scheme:dark){.result:hover{box-shadow:0 4px 12px rgba(0,0,0,.3)}}
+    .result h3{font-size:clamp(.85rem,2.5vw,.95rem);font-weight:600;margin-bottom:.25rem;word-break:break-all}
+    .result p{font-size:clamp(.78rem,2vw,.85rem);color:var(--muted);line-height:1.5;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+    .result small{display:block;margin-top:.4rem;font-size:clamp(.65rem,1.8vw,.75rem);color:var(--faint);word-break:break-all}
+    .empty{text-align:center;color:var(--faint);padding:clamp(2rem,8vw,4rem) 1rem;font-size:clamp(.9rem,2.5vw,1rem)}
+    .skeleton{display:flex;flex-direction:column;gap:.6rem}
+    .skel-card{height:5rem;border-radius:var(--radius);background:linear-gradient(90deg,var(--border) 25%,var(--surface) 50%,var(--border) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite}
+    .footer{padding:.75rem clamp(1rem,4vw,2rem);border-top:1px solid var(--border);display:flex;align-items:center;gap:.5rem;font-size:clamp(.7rem,1.8vw,.8rem);color:var(--faint)}
+    .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes shimmer{to{background-position:-200% 0}}
+    @media(min-width:768px){.results{grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}}
     </style></head>
-    <body><div class="container">
-    <h1>🔍 Paozier Search</h1>
-    <div class="search-box"><input id="q" placeholder="搜索文档内容..." autofocus><button onclick="doSearch()">搜索</button></div>
-    <div id="count"></div><div id="results"><p class="empty">输入关键词搜索本地文档</p></div>
+    <body>
+    <div class="header">
+      <div class="brand">🔍 Paozier</div>
+      <div class="search-box"><input id="q" placeholder="搜索文档内容..." autofocus><button onclick="doSearch()">搜索</button></div>
     </div>
+    <div class="main">
+      <div id="count" class="count"></div>
+      <div id="results"><p class="empty">输入关键词搜索本地文档</p></div>
+    </div>
+    <div class="footer"><div class="dot"></div><span id="status">加载中...</span></div>
     <script>
-    const q=document.getElementById('q'),res=document.getElementById('results'),cnt=document.getElementById('count');
+    const q=document.getElementById('q'),res=document.getElementById('results'),cnt=document.getElementById('count'),st=document.getElementById('status');
     q.addEventListener('keydown',e=>{if(e.key==='Enter')doSearch()});
     async function doSearch(){
-      const v=q.value.trim();if(!v){res.innerHTML='<p class="empty">输入关键词搜索</p>';cnt.textContent='';return}
-      res.innerHTML='<p class="empty">搜索中...</p>';
-      const r=await fetch('/api/search?q='+encodeURIComponent(v)).then(r=>r.json());
-      cnt.textContent=`找到 ${r.total} 个结果`;
-      if(!r.results.length){res.innerHTML='<p class="empty">无匹配结果</p>';return}
-      res.innerHTML=r.results.map(i=>`<div class="result"><h3>${esc(i.fileName)}</h3><p>${esc(i.snippet)}</p><small>${esc(i.filePath)}</small></div>`).join('');
+      const v=q.value.trim();
+      if(!v){res.innerHTML='<p class="empty">输入关键词搜索</p>';cnt.textContent='';cnt.classList.remove('show');return}
+      res.innerHTML='<div class="skeleton">'+('<div class="skel-card"></div>').repeat(4)+'</div>';
+      cnt.classList.remove('show');
+      try{
+        const r=await fetch('/api/search?q='+encodeURIComponent(v)).then(r=>r.json());
+        cnt.textContent='找到 '+r.total+' 个结果';cnt.classList.add('show');
+        if(!r.results.length){res.innerHTML='<p class="empty">无匹配结果</p>';return}
+        res.innerHTML='<div class="results">'+r.results.map((i,idx)=>'<div class="result" style="animation-delay:'+idx*50+'ms"><h3>'+esc(i.fileName)+'</h3><p>'+esc(i.snippet)+'</p><small>'+esc(i.filePath)+'</small></div>').join('')+'</div>';
+      }catch(e){res.innerHTML='<p class="empty">请求失败</p>';}
     }
     function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;'):''}
+    fetch('/api/status').then(r=>r.json()).then(d=>{st.textContent=d.documents+' 个文档已索引';}).catch(()=>{st.textContent='离线';});
     </script></body></html>
     """
 }

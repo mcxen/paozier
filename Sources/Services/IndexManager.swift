@@ -9,6 +9,7 @@ class IndexManager: ObservableObject {
     @Published var isIndexing = false
     @Published var indexProgress: Double = 0
     @Published var indexedFolders: [IndexedFolder] = []
+    @Published var selectedFolder: IndexedFolder?
     @Published var totalDocs: Int = 0
     @Published var statusMessage = "就绪"
     @Published var httpRunning = false
@@ -32,12 +33,15 @@ class IndexManager: ObservableObject {
         dataDir = appSupport.appendingPathComponent("Paozier", isDirectory: true)
         try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
         loadFolders()
+        refreshFolderCounts()
         IndexManager.shared = self
     }
 
     func startup() async {
         statusMessage = "初始化搜索引擎..."
-        await SearchEngine.shared.open()
+        await Task.detached {
+            await SearchEngine.shared.open()
+        }.value
         totalDocs = await SearchEngine.shared.documentCount
         isReady = true
         statusMessage = "就绪 · \(totalDocs) 个文档"
@@ -86,7 +90,15 @@ class IndexManager: ObservableObject {
     }
 
     func removeFolder(_ folder: IndexedFolder) {
+        let files = findFiles(in: URL(fileURLWithPath: folder.path))
+        Task {
+            await SearchEngine.shared.removeFiles(at: files)
+            totalDocs = await SearchEngine.shared.documentCount
+        }
         indexedFolders.removeAll { $0.id == folder.id }
+        if selectedFolder?.id == folder.id {
+            selectedFolder = nil
+        }
         saveFolders()
     }
 
@@ -105,6 +117,7 @@ class IndexManager: ObservableObject {
         }
 
         var failed = 0
+        await SearchEngine.shared.removeFiles(at: files)
         for (i, file) in files.enumerated() {
             do {
                 try await SearchEngine.shared.indexFile(at: file)
@@ -139,6 +152,22 @@ class IndexManager: ObservableObject {
 
     func search(query: String) async -> [SearchResult] {
         await SearchEngine.shared.search(query: query)
+    }
+
+    func files(in folder: IndexedFolder) -> [URL] {
+        findFiles(in: URL(fileURLWithPath: folder.path))
+    }
+
+    func refreshFolderCounts() {
+        var changed = false
+        for idx in indexedFolders.indices {
+            let count = findFiles(in: URL(fileURLWithPath: indexedFolders[idx].path)).count
+            if indexedFolders[idx].fileCount != count {
+                indexedFolders[idx].fileCount = count
+                changed = true
+            }
+        }
+        if changed { saveFolders() }
     }
 
     private func findFiles(in directory: URL) -> [URL] {

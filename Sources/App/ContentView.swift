@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var previewMode: PreviewMode = .live
     @State private var showCompendium = false
     @State private var showHistory = false
+    @FocusState private var searchFieldFocused: Bool
 
     enum PreviewMode { case live, pdf }
 
@@ -27,6 +28,7 @@ struct ContentView: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("搜索文档内容...", text: $searchText)
                         .textFieldStyle(.roundedBorder)
+                        .focused($searchFieldFocused)
                         .onSubmit(performSearch)
                     if isSearching { ProgressView().controlSize(.small) }
                     if !searchText.isEmpty {
@@ -34,6 +36,18 @@ struct ContentView: View {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                         }.buttonStyle(.plain)
                     }
+                    Button { performSearch() } label: {
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.title3)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching)
+                    Button { QuickSearchPanelController.shared.toggle() } label: {
+                        Image(systemName: "rectangle.and.text.magnifyingglass")
+                            .font(.callout)
+                    }
+                    .buttonStyle(.plain)
+                    .help("快速搜索面板")
                 }
                 .padding(10)
                 .background(.regularMaterial)
@@ -79,6 +93,7 @@ struct ContentView: View {
                             Button("导出高亮文档") { dataManager.exportHighlighted(result: result, terms: searchTerms) }
                             Button("收藏搜索") { dataManager.addBookmark(name: searchText, query: searchText) }
                             Divider()
+                            Button("打开文件") { NSWorkspace.shared.open(URL(fileURLWithPath: result.filePath)) }
                             Button("在 Finder 中显示") { NSWorkspace.shared.selectFile(result.filePath, inFileViewerRootedAtPath: "") }
                         } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton).frame(width: 28)
                     }
@@ -90,6 +105,8 @@ struct ContentView: View {
                         PDFPreviewView(filePath: result.filePath)
                     }
                 }
+            } else if let folder = indexManager.selectedFolder {
+                FolderContentView(folder: folder)
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "doc.text.below.ecg").font(.system(size: 44, weight: .thin)).foregroundStyle(.quaternary)
@@ -102,6 +119,16 @@ struct ContentView: View {
         .sheet(isPresented: $showCompendium) { CompendiumView().environmentObject(dataManager) }
         .sheet(isPresented: $showHistory) { HistoryView(onSelect: { q in searchText = q; showHistory = false; performSearch() }).environmentObject(dataManager) }
         .task { await indexManager.startup() }
+        .onAppear { searchFieldFocused = true }
+        .onChange(of: showHistory) { _, newValue in
+            if !newValue { searchFieldFocused = true }
+        }
+        .onChange(of: showCompendium) { _, newValue in
+            if !newValue { searchFieldFocused = true }
+        }
+        .onChange(of: indexManager.selectedFolder?.id) { _, _ in
+            selectedResult = nil
+        }
     }
 
     private func performSearch() {
@@ -112,8 +139,10 @@ struct ContentView: View {
             let items = await indexManager.search(query: q)
             await MainActor.run {
                 results = items
+                selectedResult = items.first
                 isSearching = false
                 dataManager.addHistory(query: q, resultCount: items.count)
+                searchFieldFocused = true
             }
         }
     }

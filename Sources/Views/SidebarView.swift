@@ -29,16 +29,24 @@ struct SidebarView: View {
 
                 Section {
                     ForEach(indexManager.indexedFolders) { folder in
-                        HStack(spacing: 8) {
-                            Image(systemName: "folder.fill").foregroundStyle(.blue).font(.caption)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(URL(fileURLWithPath: folder.path).lastPathComponent).font(.callout).lineLimit(1)
-                                Text("\(folder.fileCount) 文件").font(.caption2).foregroundStyle(.tertiary)
+                        Button {
+                            indexManager.selectedFolder = folder
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "folder.fill").foregroundStyle(.blue).font(.caption)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(URL(fileURLWithPath: folder.path).lastPathComponent).font(.callout).lineLimit(1)
+                                    Text("\(folder.fileCount) 文件").font(.caption2).foregroundStyle(.tertiary)
+                                }
                             }
                         }
+                        .buttonStyle(.plain)
                         .contextMenu {
+                            Button("查看内容") { indexManager.selectedFolder = folder }
                             Button("重新索引") { Task { await indexManager.indexFolder(folder) } }
+                            Button("刷新文件数量") { indexManager.refreshFolderCounts() }
                             Button("移除") { indexManager.removeFolder(folder) }
+                            Button("在 Finder 中显示") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder.path) }
                         }
                     }
                     Button { indexManager.addFolder() } label: { Label("添加文件夹", systemImage: "plus.circle") }
