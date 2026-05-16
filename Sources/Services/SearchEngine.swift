@@ -65,11 +65,30 @@ actor SearchEngine {
         let content = try extractText(from: fileURL)
         guard !content.isEmpty else { return }
 
+        let normalized = Self.normalizeForSearch(content)
+
         // SearchKit
-        _ = skIndex?.add(fileURL, text: content)
+        _ = skIndex?.add(fileURL, text: normalized)
 
         // FTS
-        _ = ftsIndex.add(url: fileURL, text: content)
+        _ = ftsIndex.add(url: fileURL, text: normalized)
+    }
+
+    /// Normalize unicode variants (dashes, quotes, whitespace) to ASCII equivalents for consistent search matching
+    static func normalizeForSearch(_ text: String) -> String {
+        var result = text
+        // Normalize dashes: en-dash, em-dash, figure dash, horizontal bar → hyphen
+        for dash in ["\u{2013}", "\u{2014}", "\u{2012}", "\u{2015}", "\u{2010}", "\u{2011}"] {
+            result = result.replacingOccurrences(of: dash, with: "-")
+        }
+        // Normalize quotes
+        for q in ["\u{2018}", "\u{2019}", "\u{201A}", "\u{2039}", "\u{203A}"] {
+            result = result.replacingOccurrences(of: q, with: "'")
+        }
+        for q in ["\u{201C}", "\u{201D}", "\u{201E}", "\u{00AB}", "\u{00BB}"] {
+            result = result.replacingOccurrences(of: q, with: "\"")
+        }
+        return result
     }
 
     func commit() {
@@ -105,7 +124,7 @@ actor SearchEngine {
             return regexSearch(options: options, limit: limit)
         }
 
-        let query = options.trimmedQuery
+        let query = Self.normalizeForSearch(options.trimmedQuery)
         let effectiveLimit = limit > 0 ? limit : _settingsLimit
         let engineLimit = options.folderPaths.isEmpty ? effectiveLimit : max(effectiveLimit * 8, 200)
         let wSK = skWeight > 0 ? skWeight : _settingsSKWeight
@@ -180,7 +199,7 @@ actor SearchEngine {
         return combined.prefix(effectiveLimit).map { item in
             let path = item.url.path
             let fileName = item.url.lastPathComponent
-            let content = (try? extractText(from: item.url)) ?? ""
+            let content = Self.normalizeForSearch((try? extractText(from: item.url)) ?? "")
             let snippet: String
             if item.score <= 0.3 && _searchFilenames {
                 snippet = "文件名匹配: \(fileName)"
@@ -223,7 +242,7 @@ actor SearchEngine {
         var matches: [SearchResult] = []
         for url in allIndexedURLs() {
             guard fileAllowed(url, extensions: options.allowedExtensions, folderPaths: options.folderPaths) else { continue }
-            let content = (try? extractText(from: url)) ?? ""
+            let content = Self.normalizeForSearch((try? extractText(from: url)) ?? "")
             let searchable = _searchFilenames ? "\(url.lastPathComponent)\n\(content)" : content
             let range = NSRange(searchable.startIndex..<searchable.endIndex, in: searchable)
             guard let match = regex.firstMatch(in: searchable, range: range) else { continue }
@@ -476,9 +495,10 @@ actor SearchEngine {
         process.standardOutput = output
         process.standardError = Pipe()
         try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { return Data() }
-        return output.fileHandleForReading.readDataToEndOfFile()
+        return data
     }
 
     private func decodeText(_ data: Data) -> String? {

@@ -255,8 +255,9 @@ struct DocxPreviewNS: NSViewRepresentable {
         process.standardOutput = output
         process.standardError = Pipe()
         try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return output.fileHandleForReading.readDataToEndOfFile()
+        return data
     }
 }
 
