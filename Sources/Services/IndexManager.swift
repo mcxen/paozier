@@ -157,8 +157,8 @@ class IndexManager: ObservableObject {
         }
     }
 
-    func search(query: String) async -> [SearchResult] {
-        await SearchEngine.shared.search(query: query)
+    func search(query: String, fileTypeFilter: FileTypeFilter = .all) async -> [SearchResult] {
+        await SearchEngine.shared.search(query: query, fileTypeFilter: fileTypeFilter)
     }
 
     func files(in folder: IndexedFolder) -> [URL] {

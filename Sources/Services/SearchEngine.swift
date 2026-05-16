@@ -99,14 +99,27 @@ actor SearchEngine {
 
     // MARK: - Search (fused results)
 
-    func search(query: String, limit: Int = 0, skWeight: Double = 0, ftsWeight: Double = 0) -> [SearchResult] {
+    func search(query: String, limit: Int = 0, skWeight: Double = 0, ftsWeight: Double = 0, fileTypeFilter: FileTypeFilter = .all) -> [SearchResult] {
         let effectiveLimit = limit > 0 ? limit : _settingsLimit
         let wSK = skWeight > 0 ? skWeight : _settingsSKWeight
         let wFTS = ftsWeight > 0 ? ftsWeight : _settingsFTSWeight
+        let allowedExtensions = fileTypeFilter.extensions
         var scoreMap: [String: (score: Double, url: URL)] = [:]
 
+        // Parse query for engine-specific formats
+        let skQuery: String
+        let ftsQuery: String
+        if QueryParser.isAdvanced(query) {
+            let tokens = QueryParser.parse(query)
+            skQuery = QueryParser.toSearchKit(tokens)
+            ftsQuery = QueryParser.toFTS5(tokens)
+        } else {
+            skQuery = query
+            ftsQuery = query
+        }
+
         // SearchKit results
-        if let skResults = skIndex?.search(query, limit: effectiveLimit) {
+        if let skResults = skIndex?.search(skQuery, limit: effectiveLimit) {
             for (i, item) in skResults.enumerated() {
                 let path = item.url.path
                 let score = Double(skResults.count - i) / Double(max(skResults.count, 1)) * wSK
@@ -115,7 +128,7 @@ actor SearchEngine {
         }
 
         // FTS results
-        if let ftsResults = ftsIndex.search(text: query) {
+        if let ftsResults = ftsIndex.search(text: ftsQuery) {
             for (i, url) in ftsResults.enumerated() {
                 let path = url.path
                 let ftsScore = Double(ftsResults.count - i) / Double(max(ftsResults.count, 1)) * wFTS
@@ -127,7 +140,14 @@ actor SearchEngine {
             }
         }
 
-        let sorted = scoreMap.values.sorted { $0.score > $1.score }.prefix(effectiveLimit)
+        let filtered: [String: (score: Double, url: URL)]
+        if let exts = allowedExtensions {
+            filtered = scoreMap.filter { exts.contains($0.value.url.pathExtension.lowercased()) }
+        } else {
+            filtered = scoreMap
+        }
+
+        let sorted = filtered.values.sorted { $0.score > $1.score }.prefix(effectiveLimit)
 
         // Filename matching: add results where filename matches but content didn't
         var filenameMatches: [(score: Double, url: URL)] = []
@@ -138,7 +158,8 @@ actor SearchEngine {
             if let allResults = ftsIndex.search(text: "*") {
                 for url in allResults {
                     let path = url.path
-                    guard scoreMap[path] == nil else { continue }
+                    guard filtered[path] == nil else { continue }
+                    if let exts = allowedExtensions, !exts.contains(url.pathExtension.lowercased()) { continue }
                     let name = url.lastPathComponent.lowercased()
                     if terms.contains(where: { name.contains($0) }) {
                         filenameMatches.append((score: 0.3, url: url))

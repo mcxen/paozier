@@ -1,5 +1,29 @@
 import Foundation
 
+enum FileTypeFilter: String, CaseIterable, Identifiable {
+    case all = "全部"
+    case pdf = "PDF"
+    case doc = "DOC"
+    case xls = "XLS"
+    case md = "MD"
+    case txt = "TXT"
+    case code = "代码"
+
+    var id: String { rawValue }
+
+    var extensions: [String]? {
+        switch self {
+        case .all: return nil
+        case .pdf: return ["pdf"]
+        case .doc: return ["doc", "docx", "rtf"]
+        case .xls: return ["xls", "xlsx", "csv"]
+        case .md: return ["md", "markdown"]
+        case .txt: return ["txt"]
+        case .code: return ["swift", "py", "js", "ts", "java", "c", "cpp", "rs", "go", "html", "htm", "json", "xml"]
+        }
+    }
+}
+
 struct SearchResult: Identifiable, Hashable {
     let id: String
     let filePath: String

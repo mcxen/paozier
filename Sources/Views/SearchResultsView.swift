@@ -5,6 +5,7 @@ struct SearchResultsView: View {
     @Binding var results: [SearchResult]
     @Binding var selectedResult: SearchResult?
     @Binding var isSearching: Bool
+    @Binding var fileTypeFilter: FileTypeFilter
     let searchError: String?
     var onSearch: () -> Void
 
@@ -52,6 +53,22 @@ struct SearchResultsView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(.regularMaterial)
+
+            // File type filter
+            HStack(spacing: 6) {
+                ForEach(FileTypeFilter.allCases) { filter in
+                    Button(filter.rawValue) {
+                        fileTypeFilter = filter
+                        if !results.isEmpty { onSearch() }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(fileTypeFilter == filter ? .blue : .gray)
+                    .controlSize(.small)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 4)
 
             Divider()
 
@@ -128,6 +145,9 @@ struct SearchResultsView: View {
 
 struct ResultRow: View {
     let result: SearchResult
+    var isSelected: Bool = false
+
+    @State private var isHovered = false
 
     private var fileIcon: String {
         let ext = URL(fileURLWithPath: result.filePath).pathExtension.lowercased()
@@ -156,42 +176,54 @@ struct ResultRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
             Image(systemName: fileIcon)
                 .foregroundStyle(iconColor)
-                .font(.title3)
-                .frame(width: 24)
+                .font(.system(size: 16))
+                .frame(width: 20, height: 20)
+                .padding(.top, 1)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(result.title.isEmpty ? result.fileName : result.title)
-                    .font(.callout.weight(.medium))
+                    .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
+                    .foregroundStyle(.primary)
 
                 if !result.snippet.isEmpty {
                     Text(result.snippet)
-                        .font(.caption)
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                        .lineLimit(3)
+                        .lineLimit(2)
                 }
 
-                HStack(spacing: 8) {
-                    if !result.author.isEmpty {
-                        Label(result.author, systemImage: "person")
-                    }
-                    if result.fileSize > 0 {
-                        Label(formatSize(result.fileSize), systemImage: "doc")
-                    }
+                HStack(spacing: 6) {
                     Text(URL(fileURLWithPath: result.filePath).pathExtension.uppercased())
+                        .font(.system(size: 9, weight: .medium))
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
                         .background(iconColor.opacity(0.1))
-                        .cornerRadius(3)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                    if result.fileSize > 0 {
+                        Text(formatSize(result.fileSize))
+                            .font(.system(size: 10))
+                    }
+
+                    if !result.author.isEmpty {
+                        Text(result.author)
+                            .font(.system(size: 10))
+                    }
                 }
-                .font(.caption2)
                 .foregroundStyle(.tertiary)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isHovered && !isSelected ? Color.primary.opacity(0.04) : Color.clear)
+        )
+        .onHover { isHovered = $0 }
     }
 
     private func formatSize(_ bytes: Int64) -> String {
