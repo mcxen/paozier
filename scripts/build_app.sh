@@ -14,6 +14,7 @@ APP_PATH="$DIST_DIR/$APP_NAME.app"
 CONTENTS="$APP_PATH/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
+APP_ICON_SOURCE="$PROJECT_DIR/Assets/AppIcon.png"
 
 echo "==> Building $APP_NAME v$VERSION ($BUILD_NUMBER)..."
 
@@ -59,6 +60,8 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <string>${APP_NAME}</string>
     <key>CFBundleDisplayName</key>
     <string>${APP_NAME}</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -107,9 +110,28 @@ ENT
 # PkgInfo
 echo -n "APPL????" > "$CONTENTS/PkgInfo"
 
-# Placeholder app icon (empty icns — Finder will show generic app icon)
-# To add a real icon, replace Resources/AppIcon.icns
-touch "$RESOURCES/AppIcon.icns"
+# App icon
+if [ -f "$APP_ICON_SOURCE" ]; then
+    ICONSET="$DIST_DIR/AppIcon.iconset"
+    rm -rf "$ICONSET"
+    mkdir -p "$ICONSET"
+
+    sips -z 16 16     "$APP_ICON_SOURCE" --out "$ICONSET/icon_16x16.png" >/dev/null
+    sips -z 32 32     "$APP_ICON_SOURCE" --out "$ICONSET/icon_16x16@2x.png" >/dev/null
+    sips -z 32 32     "$APP_ICON_SOURCE" --out "$ICONSET/icon_32x32.png" >/dev/null
+    sips -z 64 64     "$APP_ICON_SOURCE" --out "$ICONSET/icon_32x32@2x.png" >/dev/null
+    sips -z 128 128   "$APP_ICON_SOURCE" --out "$ICONSET/icon_128x128.png" >/dev/null
+    sips -z 256 256   "$APP_ICON_SOURCE" --out "$ICONSET/icon_128x128@2x.png" >/dev/null
+    sips -z 256 256   "$APP_ICON_SOURCE" --out "$ICONSET/icon_256x256.png" >/dev/null
+    sips -z 512 512   "$APP_ICON_SOURCE" --out "$ICONSET/icon_256x256@2x.png" >/dev/null
+    sips -z 512 512   "$APP_ICON_SOURCE" --out "$ICONSET/icon_512x512.png" >/dev/null
+    sips -z 1024 1024 "$APP_ICON_SOURCE" --out "$ICONSET/icon_512x512@2x.png" >/dev/null
+
+    iconutil -c icns "$ICONSET" -o "$RESOURCES/AppIcon.icns"
+    rm -rf "$ICONSET"
+else
+    echo "WARNING: $APP_ICON_SOURCE not found; using generic app icon."
+fi
 
 # Ad-hoc codesign (no Apple Developer ID needed for local use)
 echo "==> Signing..."
