@@ -2,50 +2,23 @@ import SwiftUI
 
 struct SidebarView: View {
     @EnvironmentObject var indexManager: IndexManager
+    @Binding var activePane: ContentView.MainPane
+    @State private var showServices = false
+    @State private var showFormats = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Image(systemName: "doc.text.magnifyingglass").font(.title2).foregroundStyle(.blue)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Paozier").font(.headline)
-                    Text("SearchKit + FTS5").font(.caption2).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button { SettingsWindowController.shared.show() } label: {
-                    Image(systemName: "gearshape").font(.callout)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("设置")
-            }
-            .padding(.horizontal, 14).padding(.vertical, 12).background(.ultraThinMaterial)
+            header
+            Divider()
+            paneTabs
             Divider()
 
             List {
-                Section {
-                    HStack(spacing: 10) {
-                        Circle().fill(indexManager.isReady ? .green : .orange).frame(width: 8, height: 8)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(indexManager.statusMessage).font(.caption).lineLimit(2)
-                            Text("\(indexManager.totalDocs) 个文档已索引").font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                } header: { Label("引擎", systemImage: "gearshape").font(.caption.weight(.semibold)) }
+                Section { statusCard } header: { sectionLabel("引擎", "gearshape") }
 
                 Section {
                     ForEach(indexManager.indexedFolders) { folder in
-                        Button {
-                            indexManager.selectedFolder = folder
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "folder.fill").foregroundStyle(.blue).font(.caption)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(URL(fileURLWithPath: folder.path).lastPathComponent).font(.callout).lineLimit(1)
-                                    Text("\(folder.fileCount) 文件").font(.caption2).foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
+                        folderRow(folder)
                         .buttonStyle(.plain)
                         .contextMenu {
                             Button("查看内容") { indexManager.selectedFolder = folder }
@@ -55,47 +28,193 @@ struct SidebarView: View {
                             Button("在 Finder 中显示") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder.path) }
                         }
                     }
-                    Button { indexManager.addFolder() } label: { Label("添加文件夹", systemImage: "plus.circle") }
-                        .buttonStyle(.borderless).foregroundStyle(.blue)
-                } header: { Label("文件夹", systemImage: "folder").font(.caption.weight(.semibold)) }
 
-                if indexManager.isIndexing {
-                    Section {
-                        ProgressView(value: indexManager.indexProgress).tint(.blue)
-                        Text(indexManager.statusMessage).font(.caption2).foregroundStyle(.secondary)
-                    } header: { Label("进度", systemImage: "arrow.triangle.2.circlepath").font(.caption.weight(.semibold)) }
+                    Button { indexManager.addFolder() } label: {
+                        Label("添加文件夹", systemImage: "plus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.blue)
+                } header: { foldersHeader }
+
+                Section {
+                    DisclosureGroup(isExpanded: $showServices) {
+                        serviceRow("HTTP", port: indexManager.httpServer.port, isOn: Binding(get: { indexManager.httpRunning }, set: { $0 ? indexManager.startHTTP() : indexManager.stopHTTP() }))
+                        if indexManager.httpRunning {
+                            Link("打开网页搜索", destination: URL(string: "http://localhost:\(indexManager.httpServer.port)")!)
+                                .font(.caption)
+                        }
+                        serviceRow("MCP", port: indexManager.mcpServer.port, isOn: Binding(get: { indexManager.mcpRunning }, set: { $0 ? indexManager.startMCP() : indexManager.stopMCP() }))
+                    } label: {
+                        Label("服务", systemImage: "network")
+                            .font(.caption.weight(.semibold))
+                    }
                 }
 
                 Section {
-                    HStack {
-                        Circle().fill(indexManager.httpRunning ? .green : .red).frame(width: 6, height: 6)
-                        Text("HTTP").font(.caption)
-                        Spacer()
-                        Text(":\(indexManager.httpServer.port)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                        Toggle("", isOn: Binding(get: { indexManager.httpRunning }, set: { $0 ? indexManager.startHTTP() : indexManager.stopHTTP() }))
-                            .toggleStyle(.switch).controlSize(.mini)
+                    DisclosureGroup(isExpanded: $showFormats) {
+                        Text("PDF · Word · TXT · MD · HTML · JSON · XML · CSV · RTF · EPUB · 代码文件")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } label: {
+                        Label("支持格式", systemImage: "doc.on.doc")
+                            .font(.caption.weight(.semibold))
                     }
-                    if indexManager.httpRunning {
-                        Link("打开网页搜索", destination: URL(string: "http://localhost:\(indexManager.httpServer.port)")!)
-                            .font(.caption)
-                    }
-                    HStack {
-                        Circle().fill(indexManager.mcpRunning ? .green : .red).frame(width: 6, height: 6)
-                        Text("MCP").font(.caption)
-                        Spacer()
-                        Text(":\(indexManager.mcpServer.port)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                        Toggle("", isOn: Binding(get: { indexManager.mcpRunning }, set: { $0 ? indexManager.startMCP() : indexManager.stopMCP() }))
-                            .toggleStyle(.switch).controlSize(.mini)
-                    }
-                } header: { Label("服务", systemImage: "network").font(.caption.weight(.semibold)) }
-
-                Section {
-                    Text("PDF · Word · TXT · MD · HTML · JSON · XML · CSV · RTF · EPUB · 代码文件")
-                        .font(.caption2).foregroundStyle(.tertiary).lineLimit(3)
-                } header: { Label("支持格式", systemImage: "doc.on.doc").font(.caption.weight(.semibold)) }
+                }
             }
             .listStyle(.sidebar)
         }
         .frame(minWidth: 220, idealWidth: 250)
+    }
+
+    private var header: some View {
+        HStack {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.title2)
+                .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Paozier").font(.headline)
+                Text("SearchKit + FTS5").font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { SettingsWindowController.shared.show() } label: {
+                Image(systemName: "gearshape").font(.callout)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("设置")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+    }
+
+    private var paneTabs: some View {
+        HStack(spacing: 6) {
+            Button {
+                activePane = .search
+            } label: {
+                Label("搜索", systemImage: "magnifyingglass")
+                    .labelStyle(.titleAndIcon)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(activePane == .search ? .blue : .gray)
+
+            Button {
+                activePane = .index
+            } label: {
+                Label("索引", systemImage: "chart.bar.doc.horizontal")
+                    .labelStyle(.titleAndIcon)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(activePane == .index ? .blue : .gray)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private var statusCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(indexManager.isIndexing ? Color.blue : (indexManager.isReady ? .green : .orange))
+                    .frame(width: 8, height: 8)
+                Text(indexManager.isIndexing ? "索引中" : (indexManager.isReady ? "就绪" : "初始化"))
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text("\(indexManager.totalDocs.formatted())")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            if indexManager.isIndexing {
+                ProgressView(value: indexManager.indexProgress)
+                    .tint(.blue)
+                HStack {
+                    Text(indexManager.indexingFolderName.isEmpty ? indexManager.statusMessage : indexManager.indexingFolderName)
+                        .lineLimit(1)
+                    Spacer()
+                    Text("\(indexManager.indexingFileCount)/\(indexManager.indexingTotalFiles)")
+                        .monospacedDigit()
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                if indexManager.indexingFailedCount > 0 {
+                    Text("\(indexManager.indexingFailedCount) 个文件失败")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            } else {
+                Text(indexManager.statusMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var foldersHeader: some View {
+        HStack {
+            sectionLabel("文件夹", "folder")
+            Spacer()
+            Button {
+                Task { await indexManager.reindexAll() }
+            } label: {
+                Image(systemName: "arrow.triangle.2.circlepath")
+            }
+            .buttonStyle(.plain)
+            .disabled(indexManager.isIndexing)
+            .help("重新索引全部")
+        }
+    }
+
+    private func folderRow(_ folder: IndexedFolder) -> some View {
+        Button {
+            indexManager.selectedFolder = folder
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "folder.fill")
+                    .foregroundStyle(.blue)
+                    .font(.caption)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(URL(fileURLWithPath: folder.path).lastPathComponent)
+                        .font(.callout.weight(indexManager.selectedFolder?.id == folder.id ? .semibold : .regular))
+                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text("\(folder.fileCount) 文件")
+                        if let lastIndexed = folder.lastIndexed {
+                            Text("·")
+                            Text(lastIndexed, style: .relative)
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    private func serviceRow(_ name: String, port: UInt16, isOn: Binding<Bool>) -> some View {
+        HStack {
+            Circle().fill(isOn.wrappedValue ? .green : .red).frame(width: 6, height: 6)
+            Text(name).font(.caption)
+            Spacer()
+            Text(":\(port)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            Toggle("", isOn: isOn)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+        }
+    }
+
+    private func sectionLabel(_ title: String, _ systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption.weight(.semibold))
     }
 }

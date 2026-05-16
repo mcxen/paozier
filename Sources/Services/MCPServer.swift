@@ -9,7 +9,7 @@ class MCPServer {
 
     private static let toolsJSON = """
     [
-      {"name":"search_documents","description":"Full-text search across all indexed documents.","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search keywords"},"limit":{"type":"integer","description":"Max results (default 10)"}},"required":["query"]}},
+      {"name":"search_documents","description":"Full-text search across all indexed documents. Returns structured results optimized for LLM consumption with exact-match snippets.","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search keywords"},"limit":{"type":"integer","description":"Max results (default 10)"},"context_chars":{"type":"integer","description":"Characters of context before/after each match (default 100)"},"include_content":{"type":"boolean","description":"Include full document text in results (default false)"},"max_content_length":{"type":"integer","description":"Max chars of full content per result when include_content=true (default 8000)"}},"required":["query"]}},
       {"name":"get_document_content","description":"Read the full text content of a file by path.","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute file path"}},"required":["path"]}},
       {"name":"index_folder","description":"Add a folder to the search index. Recursively indexes all supported files.","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute folder path"}},"required":["path"]}},
       {"name":"list_indexed_folders","description":"List all currently indexed folders with file counts.","inputSchema":{"type":"object","properties":{}}},
@@ -82,9 +82,34 @@ class MCPServer {
         case "search_documents":
             let query = arguments["query"] as? String ?? ""
             let limit = arguments["limit"] as? Int ?? 10
+            let contextChars = arguments["context_chars"] as? Int ?? 100
+            let includeContent = arguments["include_content"] as? Bool ?? false
+            let maxContentLength = arguments["max_content_length"] as? Int ?? 8000
             let results = await SearchEngine.shared.search(query: query, limit: limit)
             if results.isEmpty { return "No results found for: \(query)" }
-            return results.map { "[\($0.fileName)] \($0.filePath)\n  \($0.snippet)" }.joined(separator: "\n\n")
+            let structured = results.enumerated().map { idx, r -> String in
+                var entry = """
+                ## Result \(idx + 1): \(r.fileName)
+                - path: \(r.filePath)
+                - size: \(formatSize(r.fileSize))
+                - modified: \(r.lastModified?.description ?? "unknown")
+                
+                ### Matching Snippets
+                """
+                let snippets = extractExactSnippets(query: query, content: r.content, contextChars: contextChars)
+                if snippets.isEmpty {
+                    entry += "\n\(r.snippet)"
+                } else {
+                    entry += "\n" + snippets.enumerated().map { i, s in "[\(i+1)] ...\(s)..." }.joined(separator: "\n")
+                }
+                if includeContent {
+                    let text = String(r.content.prefix(maxContentLength))
+                    entry += "\n\n### Full Content\n\(text)"
+                    if r.content.count > maxContentLength { entry += "\n[truncated at \(maxContentLength) chars]" }
+                }
+                return entry
+            }
+            return "# Search Results for: \(query)\nFound \(results.count) result(s)\n\n" + structured.joined(separator: "\n\n---\n\n")
 
         case "get_document_content":
             let path = arguments["path"] as? String ?? ""
@@ -172,6 +197,25 @@ class MCPServer {
         if bytes < 1024 { return "\(bytes) B" }
         if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024) }
         return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+    }
+
+    private func extractExactSnippets(query: String, content: String, contextChars: Int, maxSnippets: Int = 3) -> [String] {
+        let terms = query.lowercased().split(separator: " ").map(String.init)
+        guard !content.isEmpty, !terms.isEmpty else { return [] }
+        let lower = content.lowercased()
+        var snippets: [String] = []
+        for term in terms {
+            var searchStart = lower.startIndex
+            while snippets.count < maxSnippets, let range = lower.range(of: term, range: searchStart..<lower.endIndex) {
+                let start = content.index(range.lowerBound, offsetBy: -min(contextChars, content.distance(from: content.startIndex, to: range.lowerBound)), limitedBy: content.startIndex) ?? content.startIndex
+                let end = content.index(range.upperBound, offsetBy: min(contextChars, content.distance(from: range.upperBound, to: content.endIndex)), limitedBy: content.endIndex) ?? content.endIndex
+                let snippet = String(content[start..<end]).replacingOccurrences(of: "\n", with: " ")
+                snippets.append(snippet)
+                searchStart = range.upperBound
+            }
+            if snippets.count >= maxSnippets { break }
+        }
+        return snippets
     }
 
     private func jsonRPCResult(id: Any?, result: [String: Any]) -> Data {

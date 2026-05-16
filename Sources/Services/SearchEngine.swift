@@ -2,6 +2,7 @@ import Foundation
 import DFSearchKit
 import DSFFullTextSearchIndex
 import PDFKit
+import Vision
 
 /// Dual-engine search: Apple SearchKit (relevance ranking) + SQLite FTS5 (CJK)
 actor SearchEngine {
@@ -206,6 +207,11 @@ actor SearchEngine {
         return search(options: options, limit: limit, skWeight: skWeight, ftsWeight: ftsWeight)
     }
 
+    func isIndexed(path: String) -> Bool {
+        let normalized = normalizedPath(path)
+        return allIndexedURLs().contains { normalizedPath($0.path) == normalized }
+    }
+
     private func regexSearch(options: SearchOptions, limit: Int) -> [SearchResult] {
         let effectiveLimit = limit > 0 ? limit : _settingsLimit
         let query = options.trimmedQuery
@@ -291,7 +297,7 @@ actor SearchEngine {
         case "pdf":
             return extractPDFText(from: url)
         case "docx":
-            return try extractOfficeXMLText(from: url, prefixes: ["word/document", "word/header", "word/footer", "word/footnotes", "word/endnotes", "word/comments"])
+            return try extractDocxText(from: url)
         case "pptx":
             return try extractOfficeXMLText(from: url, prefixes: ["ppt/slides/slide", "ppt/notesSlides/notesSlide"])
         case "xlsx":
@@ -312,10 +318,69 @@ actor SearchEngine {
         guard let doc = PDFDocument(url: url) else { return "" }
         var text = ""
         for i in 0..<doc.pageCount {
-            text += doc.page(at: i)?.string ?? ""
-            text += "\n"
+            guard let page = doc.page(at: i) else { continue }
+            let pageText = page.string ?? ""
+            if !pageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                text += pageText + "\n"
+            } else {
+                // OCR fallback for image-based pages
+                text += ocrPage(page) + "\n"
+            }
         }
         return text
+    }
+
+    private func ocrPage(_ page: PDFPage) -> String {
+        let bounds = page.bounds(for: .mediaBox)
+        let scale: CGFloat = 2.0
+        let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        guard let context = CGContext(data: nil, width: Int(size.width), height: Int(size.height),
+                                      bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue) else { return "" }
+        context.setFillColor(.white)
+        context.fill(CGRect(origin: .zero, size: size))
+        context.scaleBy(x: scale, y: scale)
+        page.draw(with: .mediaBox, to: context)
+        guard let cgImage = context.makeImage() else { return "" }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var ocrText = ""
+        let request = VNRecognizeTextRequest { request, _ in
+            let observations = request.results as? [VNRecognizedTextObservation] ?? []
+            ocrText = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+            semaphore.signal()
+        }
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en-US"]
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try? handler.perform([request])
+        semaphore.wait()
+        return ocrText
+    }
+
+    private func extractDocxText(from url: URL) throws -> String {
+        let entries = try unzipEntries(in: url)
+        var parts: [String] = []
+
+        // Extract metadata from docProps/core.xml
+        if entries.contains("docProps/core.xml"),
+           let data = try? unzipData(from: url, entry: "docProps/core.xml") {
+            let meta = DocxMetadataParser.parse(data)
+            if !meta.isEmpty { parts.append(meta) }
+        }
+
+        // Extract body text
+        let contentPrefixes = ["word/document", "word/header", "word/footer", "word/footnotes", "word/endnotes"]
+        let contentEntries = entries
+            .filter { entry in entry.hasSuffix(".xml") && contentPrefixes.contains(where: { entry.hasPrefix($0) }) }
+            .sorted()
+        for entry in contentEntries {
+            guard let data = try? unzipData(from: url, entry: entry) else { continue }
+            let text = DocxBodyParser.parse(data)
+            if !text.isEmpty { parts.append(text) }
+        }
+        return parts.joined(separator: "\n\n")
     }
 
     private func extractOfficeXMLText(from url: URL, prefixes: [String]) throws -> String {
@@ -463,5 +528,72 @@ private final class XMLTextParser: NSObject, XMLParserDelegate {
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
         values.append(string)
+    }
+}
+
+/// Parses docProps/core.xml for title, subject, creator, keywords, description
+private final class DocxMetadataParser: NSObject, XMLParserDelegate {
+    private var currentElement = ""
+    private var currentText = ""
+    private var metadata: [String: String] = [:]
+    private static let metaElements: Set<String> = ["dc:title", "dc:subject", "dc:creator", "cp:keywords", "dc:description", "cp:category"]
+
+    static func parse(_ data: Data) -> String {
+        let delegate = DocxMetadataParser()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        parser.parse()
+        return delegate.metadata.values.filter { !$0.isEmpty }.joined(separator: " | ")
+    }
+
+    func parser(_ parser: XMLParser, didStartElement element: String, namespaceURI: String?, qualifiedName: String?, attributes: [String: String] = [:]) {
+        currentElement = element
+        currentText = ""
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        currentText += string
+    }
+
+    func parser(_ parser: XMLParser, didEndElement element: String, namespaceURI: String?, qualifiedName: String?) {
+        if Self.metaElements.contains(element) {
+            let trimmed = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { metadata[element] = trimmed }
+        }
+    }
+}
+
+/// Parses word/document.xml preserving paragraph structure
+private final class DocxBodyParser: NSObject, XMLParserDelegate {
+    private var paragraphs: [String] = []
+    private var currentParagraph = ""
+    private var inParagraph = false
+
+    static func parse(_ data: Data) -> String {
+        let delegate = DocxBodyParser()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        parser.parse()
+        return delegate.paragraphs.joined(separator: "\n")
+    }
+
+    func parser(_ parser: XMLParser, didStartElement element: String, namespaceURI: String?, qualifiedName: String?, attributes: [String: String] = [:]) {
+        let local = element.split(separator: ":").last.map(String.init) ?? element
+        if local == "p" { inParagraph = true; currentParagraph = "" }
+        // w:tab and w:br insert spacing
+        if inParagraph && (local == "tab" || local == "br") { currentParagraph += " " }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        if inParagraph { currentParagraph += string }
+    }
+
+    func parser(_ parser: XMLParser, didEndElement element: String, namespaceURI: String?, qualifiedName: String?) {
+        let local = element.split(separator: ":").last.map(String.init) ?? element
+        if local == "p" {
+            let trimmed = currentParagraph.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { paragraphs.append(trimmed) }
+            inParagraph = false
+        }
     }
 }

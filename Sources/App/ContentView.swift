@@ -15,9 +15,15 @@ struct ContentView: View {
     @State private var previewMode: PreviewMode = .live
     @State private var showCompendium = false
     @State private var showHistory = false
+    @State private var activePane: MainPane = .search
+    @State private var primaryMatchStep = 0
+    @State private var previewFindText = ""
+    @State private var previewFindStep = 0
     @FocusState private var searchFieldFocused: Bool
+    @FocusState private var previewFindFocused: Bool
 
     enum PreviewMode { case live, pdf }
+    enum MainPane { case search, index }
 
     private var searchTerms: [String] {
         currentSearchOptions.highlightTerms
@@ -35,12 +41,16 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            SidebarView()
+            SidebarView(activePane: $activePane)
         } content: {
-            contentPane
+            if activePane == .search {
+                contentPane
+            } else {
+                IndexManagementView()
+            }
         } detail: {
             detailPane
-                .id(selectedResult?.id)
+                .id(selectedResult?.id ?? indexManager.selectedFolder?.id ?? "empty")
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.2), value: selectedResult?.id)
         }
@@ -50,6 +60,9 @@ struct ContentView: View {
         .background {
             Button("") { GlobalSearchPopupController.shared.toggle() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
+                .hidden()
+            Button("") { previewFindFocused = true }
+                .keyboardShortcut("f", modifiers: [.command])
                 .hidden()
         }
         .task { await indexManager.startup() }
@@ -178,7 +191,7 @@ struct ContentView: View {
                 .animation(.smooth(duration: 0.25), value: results.map(\.id))
             }
         }
-        .frame(minWidth: 300, idealWidth: 360)
+        .frame(minWidth: 300)
     }
 
     // MARK: - Detail Pane (Preview)
@@ -196,7 +209,28 @@ struct ContentView: View {
                         .pickerStyle(.segmented)
                         .frame(width: 200)
 
+                        matchNavigationControls
+
                         Spacer()
+
+                        HStack(spacing: 4) {
+                            TextField("预览内查找", text: $previewFindText)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 11))
+                                .frame(width: 150)
+                                .focused($previewFindFocused)
+                                .onSubmit { previewFindStep += 1 }
+                            Button { previewFindStep -= 1 } label: {
+                                Image(systemName: "chevron.up")
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(previewFindText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            Button { previewFindStep += 1 } label: {
+                                Image(systemName: "chevron.down")
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(previewFindText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
 
                         Menu {
                             Button("添加到报告") { dataManager.addToCompendium(result: result, query: searchText) }
@@ -222,9 +256,21 @@ struct ContentView: View {
                     // Preview content with crossfade
                     Group {
                         if previewMode == .live {
-                            LivePreviewView(result: result, searchOptions: currentSearchOptions)
+                            LivePreviewView(
+                                result: result,
+                                searchOptions: currentSearchOptions,
+                                primaryNavigationStep: primaryMatchStep,
+                                secondaryQuery: previewFindText,
+                                secondaryNavigationStep: previewFindStep
+                            )
                         } else {
-                            PDFPreviewView(filePath: result.filePath, searchTerms: searchTerms)
+                            PDFPreviewView(
+                                filePath: result.filePath,
+                                searchTerms: searchTerms,
+                                primaryNavigationStep: primaryMatchStep,
+                                secondarySearchTerms: previewFindTerms,
+                                secondaryNavigationStep: previewFindStep
+                            )
                         }
                     }
                     .transition(.opacity)
@@ -247,6 +293,32 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+
+    private var previewFindTerms: [String] {
+        previewFindText
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
+    private var matchNavigationControls: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 6))
+                .foregroundStyle(.yellow)
+            Button { primaryMatchStep -= 1 } label: {
+                Image(systemName: "chevron.up")
+            }
+            .buttonStyle(.plain)
+            .disabled(searchTerms.isEmpty)
+            Button { primaryMatchStep += 1 } label: {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.plain)
+            .disabled(searchTerms.isEmpty)
+        }
+        .help("跳转搜索词高亮")
     }
 
     private var hasActiveSearchOptions: Bool {

@@ -14,13 +14,18 @@ class IndexManager: ObservableObject {
     @Published var statusMessage = "就绪"
     @Published var httpRunning = false
     @Published var mcpRunning = false
+    @Published var indexingFolderName = ""
+    @Published var indexingFileCount = 0
+    @Published var indexingTotalFiles = 0
+    @Published var indexingFailedCount = 0
 
     let httpServer = HTTPServer()
     let mcpServer = MCPServer()
 
     private let dataDir: URL
+    private var isStartingUp = false
 
-    static let supportedExtensions: Set<String> = [
+    nonisolated static let supportedExtensions: Set<String> = [
         "pdf", "txt", "md", "markdown", "docx", "doc", "rtf",
         "html", "htm", "xml", "json", "csv", "tsv",
         "pptx", "ppt", "xlsx", "xls", "odt", "ods", "odp", "epub",
@@ -38,6 +43,16 @@ class IndexManager: ObservableObject {
     }
 
     func startup() async {
+        if isReady { return }
+        if isStartingUp {
+            while !isReady {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            return
+        }
+        isStartingUp = true
+        defer { isStartingUp = false }
+
         let s = AppSettings.shared
         statusMessage = "初始化搜索引擎..."
         await SearchEngine.shared.updateSettings(
@@ -88,9 +103,17 @@ class IndexManager: ObservableObject {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            var folder = IndexedFolder(path: url.path)
-            folder.fileCount = findFiles(in: url).count
+            let path = url.standardizedFileURL.path
+            if let existing = indexedFolders.first(where: { normalizedPath($0.path) == path }) {
+                selectedFolder = existing
+                Task { await indexFolder(existing) }
+                return
+            }
+
+            var folder = IndexedFolder(path: path)
+            folder.fileCount = Self.findSupportedFiles(in: URL(fileURLWithPath: path)).count
             indexedFolders.append(folder)
+            selectedFolder = folder
             saveFolders()
             Task { await indexFolder(folder) }
         }
@@ -110,30 +133,58 @@ class IndexManager: ObservableObject {
     }
 
     func indexFolder(_ folder: IndexedFolder) async {
+        if isIndexing {
+            statusMessage = "已有索引任务正在运行..."
+            return
+        }
+
+        if !isReady {
+            statusMessage = "等待搜索引擎初始化..."
+            await startup()
+        }
+
         isIndexing = true
         indexProgress = 0
+        indexingFolderName = URL(fileURLWithPath: folder.path).lastPathComponent
+        indexingFileCount = 0
+        indexingTotalFiles = 0
+        indexingFailedCount = 0
         statusMessage = "扫描文件..."
+        defer {
+            isIndexing = false
+            indexingFolderName = ""
+        }
 
-        let files = findFiles(in: URL(fileURLWithPath: folder.path))
+        let folderURL = URL(fileURLWithPath: folder.path)
+        let files = await Task.detached(priority: .userInitiated) {
+            Self.findSupportedFiles(in: folderURL)
+        }.value
         let total = files.count
+        indexingTotalFiles = total
 
         if total == 0 {
             statusMessage = "未找到支持的文件"
-            isIndexing = false
             return
         }
 
         var failed = 0
-        await SearchEngine.shared.removeFiles(at: files)
+        var lastUIUpdate = Date.distantPast
         for (i, file) in files.enumerated() {
             do {
+                await SearchEngine.shared.removeFile(at: file)
                 try await SearchEngine.shared.indexFile(at: file)
             } catch {
                 failed += 1
             }
-            indexProgress = Double(i + 1) / Double(total)
-            if i % 10 == 0 {
-                statusMessage = "索引中 (\(i + 1)/\(total))\(failed > 0 ? " 失败\(failed)" : "")"
+
+            let completed = i + 1
+            let shouldUpdate = completed == total || completed % 25 == 0 || Date().timeIntervalSince(lastUIUpdate) > 0.25
+            if shouldUpdate {
+                indexProgress = Double(completed) / Double(total)
+                indexingFileCount = completed
+                indexingFailedCount = failed
+                statusMessage = "索引中 \(completed)/\(total)"
+                lastUIUpdate = Date()
             }
         }
 
@@ -146,8 +197,7 @@ class IndexManager: ObservableObject {
         }
 
         totalDocs = await SearchEngine.shared.documentCount
-        isIndexing = false
-        statusMessage = "索引完成 · \(totalDocs) 个文档"
+        statusMessage = failed > 0 ? "索引完成 · \(totalDocs) 个文档 · \(failed) 个失败" : "索引完成 · \(totalDocs) 个文档"
     }
 
     func reindexAll() async {
@@ -184,6 +234,10 @@ class IndexManager: ObservableObject {
     }
 
     private func findFiles(in directory: URL) -> [URL] {
+        Self.findSupportedFiles(in: directory)
+    }
+
+    nonisolated private static func findSupportedFiles(in directory: URL) -> [URL] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return [] }
         var files: [URL] = []
@@ -191,10 +245,14 @@ class IndexManager: ObservableObject {
             let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey])
             guard values?.isRegularFile == true else { continue }
             if Self.supportedExtensions.contains(fileURL.pathExtension.lowercased()) {
-                files.append(fileURL)
+                files.append(fileURL.standardizedFileURL)
             }
         }
         return files.sorted { $0.path < $1.path }
+    }
+
+    private func normalizedPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
     private var foldersFile: URL { dataDir.appendingPathComponent("folders.json") }

@@ -132,6 +132,9 @@ struct SettingsView: View {
                 }
                 Toggle("启动时自动开启", isOn: $settings.mcpAutoStart)
             }
+            Section("MCP 配置 (复制到 AI 工具)") {
+                MCPConfigView(port: settings.mcpPort)
+            }
             Text("端口修改需重启应用生效").font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
@@ -220,6 +223,59 @@ struct SettingsView: View {
         case "compendium": DataManager.shared.clearCompendium()
         case "index": Task { await IndexManager.shared?.reindexAll() }
         default: break
+        }
+    }
+}
+
+// MARK: - MCP Config View
+
+struct MCPConfigView: View {
+    let port: Int
+    @State private var copied = false
+
+    private var configJSON: String {
+        """
+        {
+          "mcpServers": {
+            "paozier": {
+              "command": "nc",
+              "args": ["localhost", "\(port)"],
+              "env": {}
+            }
+          }
+        }
+        """
+    }
+
+    private var httpConfigJSON: String {
+        """
+        {
+          "mcpServers": {
+            "paozier": {
+              "url": "http://localhost:\(port)",
+              "transport": "tcp"
+            }
+          }
+        }
+        """
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("TCP 连接方式 (Claude Desktop / Cline / Cursor)").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text(httpConfigJSON).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
+                    .padding(6).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(.quaternary))
+                Spacer()
+                Button(copied ? "已复制" : "复制") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(httpConfigJSON, forType: .string)
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copied = false }
+                }
+                .controlSize(.small)
+            }
         }
     }
 }

@@ -7,6 +7,8 @@ class HTTPServer {
     private var listener: NWListener?
     private(set) var port: UInt16 = 9880
     var isRunning: Bool { listener != nil }
+    private let recentPathsQueue = DispatchQueue(label: "paozier.http.recent-paths")
+    private var recentResultPaths: Set<String> = []
 
     func start(port: UInt16 = 9880) throws {
         self.port = port
@@ -55,14 +57,11 @@ class HTTPServer {
             if query.isEmpty {
                 return Self.jsonResponse(["results": [], "total": 0] as [String: Any])
             }
-            let folderPaths = await indexedFolderPaths()
-            let results = await SearchEngine.shared.search(
-                options: SearchOptions(query: query, folderPaths: folderPaths),
-                limit: 20
-            )
+            let results = await SearchEngine.shared.search(query: query, limit: 20)
             let items = results.map { r in
                 ["id": r.id, "fileName": r.fileName, "filePath": r.filePath, "snippet": r.snippet, "fileSize": r.fileSize] as [String: Any]
             }
+            rememberResultPaths(results.map(\.filePath))
             return Self.jsonResponse(["results": items, "total": items.count, "query": query])
         }
 
@@ -114,15 +113,32 @@ class HTTPServer {
     private func isPathAllowed(_ path: String) async -> Bool {
         let normalizedPath = Self.normalizedPath(path)
         let folders = await indexedFolderPaths()
-        return folders.contains { folderPath in
+        if folders.contains(where: { folderPath in
             normalizedPath == folderPath || normalizedPath.hasPrefix(folderPath + "/")
+        }) {
+            return true
         }
+        return isRecentResultPath(normalizedPath)
     }
 
     private func indexedFolderPaths() async -> Set<String> {
         await MainActor.run {
             Set((IndexManager.shared?.indexedFolders ?? []).map { Self.normalizedPath($0.path) })
         }
+    }
+
+    private func rememberResultPaths(_ paths: [String]) {
+        let normalized = paths.map(Self.normalizedPath)
+        recentPathsQueue.sync {
+            recentResultPaths.formUnion(normalized)
+            if recentResultPaths.count > 500 {
+                recentResultPaths = Set(recentResultPaths.suffix(300))
+            }
+        }
+    }
+
+    private func isRecentResultPath(_ path: String) -> Bool {
+        recentPathsQueue.sync { recentResultPaths.contains(path) }
     }
 
     // MARK: - Helpers
