@@ -14,11 +14,11 @@ A native macOS full-text search client powered by Apple SearchKit + SQLite FTS5 
 
 搜索界面
 
-![截屏2026-05-16 下午2.08.43](./README.assets/截屏2026-05-16 下午2.08.43.png)
+![截屏2026-05-16 下午2.08.43](README.assets/截屏2026-05-16 下午2.08.43.png)
 
 支持查看索引结果：
 
-![截屏2026-05-16 下午2.10.08](./README.assets/截屏2026-05-16 下午2.10.08.png)
+![截屏2026-05-16 下午2.10.08](README.assets/截屏2026-05-16 下午2.10.08.png)
 
 ## ✨ 功能特性 / Features
 
