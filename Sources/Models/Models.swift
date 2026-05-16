@@ -24,6 +24,38 @@ enum FileTypeFilter: String, CaseIterable, Identifiable {
     }
 }
 
+struct SearchOptions: Hashable {
+    var query: String = ""
+    var selectedFileTypes: Set<FileTypeFilter> = []
+    var folderPaths: Set<String> = []
+    var usesRegex: Bool = false
+    var fuzzySpaces: Bool = true
+
+    var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var allowedExtensions: Set<String>? {
+        if selectedFileTypes.isEmpty || selectedFileTypes.contains(.all) {
+            return nil
+        }
+        let extensions = selectedFileTypes.flatMap { $0.extensions ?? [] }
+        return extensions.isEmpty ? nil : Set(extensions)
+    }
+
+    var searchScopeDescription: String {
+        folderPaths.isEmpty ? "全部文件夹" : "指定文件夹"
+    }
+
+    var highlightTerms: [String] {
+        guard !usesRegex else { return [trimmedQuery].filter { !$0.isEmpty } }
+        return trimmedQuery
+            .split(whereSeparator: \.isWhitespace)
+            .map { String($0).replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "*", with: "") }
+            .filter { !$0.isEmpty && !["AND", "OR", "NOT"].contains($0.uppercased()) && !$0.hasPrefix("-") }
+    }
+}
+
 struct SearchResult: Identifiable, Hashable {
     let id: String
     let filePath: String

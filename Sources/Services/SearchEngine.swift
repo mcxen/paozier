@@ -99,11 +99,17 @@ actor SearchEngine {
 
     // MARK: - Search (fused results)
 
-    func search(query: String, limit: Int = 0, skWeight: Double = 0, ftsWeight: Double = 0, fileTypeFilter: FileTypeFilter = .all) -> [SearchResult] {
+    func search(options: SearchOptions, limit: Int = 0, skWeight: Double = 0, ftsWeight: Double = 0) -> [SearchResult] {
+        if options.usesRegex {
+            return regexSearch(options: options, limit: limit)
+        }
+
+        let query = options.trimmedQuery
         let effectiveLimit = limit > 0 ? limit : _settingsLimit
+        let engineLimit = options.folderPaths.isEmpty ? effectiveLimit : max(effectiveLimit * 8, 200)
         let wSK = skWeight > 0 ? skWeight : _settingsSKWeight
         let wFTS = ftsWeight > 0 ? ftsWeight : _settingsFTSWeight
-        let allowedExtensions = fileTypeFilter.extensions
+        let allowedExtensions = options.allowedExtensions
         var scoreMap: [String: (score: Double, url: URL)] = [:]
 
         // Parse query for engine-specific formats
@@ -119,7 +125,7 @@ actor SearchEngine {
         }
 
         // SearchKit results
-        if let skResults = skIndex?.search(skQuery, limit: effectiveLimit) {
+        if let skResults = skIndex?.search(skQuery, limit: engineLimit) {
             for (i, item) in skResults.enumerated() {
                 let path = item.url.path
                 let score = Double(skResults.count - i) / Double(max(skResults.count, 1)) * wSK
@@ -141,10 +147,8 @@ actor SearchEngine {
         }
 
         let filtered: [String: (score: Double, url: URL)]
-        if let exts = allowedExtensions {
-            filtered = scoreMap.filter { exts.contains($0.value.url.pathExtension.lowercased()) }
-        } else {
-            filtered = scoreMap
+        filtered = scoreMap.filter { _, item in
+            fileAllowed(item.url, extensions: allowedExtensions, folderPaths: options.folderPaths)
         }
 
         let sorted = filtered.values.sorted { $0.score > $1.score }.prefix(effectiveLimit)
@@ -152,22 +156,25 @@ actor SearchEngine {
         // Filename matching: add results where filename matches but content didn't
         var filenameMatches: [(score: Double, url: URL)] = []
         if _searchFilenames {
-            let queryLower = query.lowercased()
-            let terms = queryLower.split(separator: " ").map(String.init)
+            let terms = options.highlightTerms.map { $0.lowercased() }
             // Check all indexed docs via FTS index URLs
-            if let allResults = ftsIndex.search(text: "*") {
-                for url in allResults {
-                    let path = url.path
-                    guard filtered[path] == nil else { continue }
-                    if let exts = allowedExtensions, !exts.contains(url.pathExtension.lowercased()) { continue }
-                    let name = url.lastPathComponent.lowercased()
-                    if terms.contains(where: { name.contains($0) }) {
-                        filenameMatches.append((score: 0.3, url: url))
-                    }
+            for url in allIndexedURLs() {
+                let path = url.path
+                guard filtered[path] == nil else { continue }
+                guard fileAllowed(url, extensions: allowedExtensions, folderPaths: options.folderPaths) else { continue }
+                let name = url.lastPathComponent.lowercased()
+                if terms.contains(where: { name.contains($0) }) {
+                    filenameMatches.append((score: 0.3, url: url))
                 }
             }
         }
-        let combined = Array(sorted) + filenameMatches.prefix(effectiveLimit / 3)
+        var combined = Array(sorted) + filenameMatches.prefix(effectiveLimit / 3)
+
+        if options.fuzzySpaces, options.highlightTerms.count > 1 {
+            let existing = Set(combined.map { $0.url.path })
+            let fuzzyMatches = fuzzyContentMatches(options: options, excluding: existing, limit: max(effectiveLimit / 2, 10))
+            combined += fuzzyMatches
+        }
 
         return combined.prefix(effectiveLimit).map { item in
             let path = item.url.path
@@ -177,7 +184,7 @@ actor SearchEngine {
             if item.score <= 0.3 && _searchFilenames {
                 snippet = "文件名匹配: \(fileName)"
             } else {
-                snippet = extractSnippet(path: path, query: query)
+                snippet = extractSnippet(path: path, options: options)
             }
             return SearchResult(
                 id: path,
@@ -191,6 +198,89 @@ actor SearchEngine {
                 lastModified: nil
             )
         }
+    }
+
+    func search(query: String, limit: Int = 0, skWeight: Double = 0, ftsWeight: Double = 0, fileTypeFilter: FileTypeFilter = .all) -> [SearchResult] {
+        var options = SearchOptions(query: query)
+        options.selectedFileTypes = fileTypeFilter == .all ? [] : [fileTypeFilter]
+        return search(options: options, limit: limit, skWeight: skWeight, ftsWeight: ftsWeight)
+    }
+
+    private func regexSearch(options: SearchOptions, limit: Int) -> [SearchResult] {
+        let effectiveLimit = limit > 0 ? limit : _settingsLimit
+        let query = options.trimmedQuery
+        guard !query.isEmpty,
+              let regex = try? NSRegularExpression(pattern: query, options: [.caseInsensitive]) else {
+            return []
+        }
+
+        var matches: [SearchResult] = []
+        for url in allIndexedURLs() {
+            guard fileAllowed(url, extensions: options.allowedExtensions, folderPaths: options.folderPaths) else { continue }
+            let content = (try? extractText(from: url)) ?? ""
+            let searchable = _searchFilenames ? "\(url.lastPathComponent)\n\(content)" : content
+            let range = NSRange(searchable.startIndex..<searchable.endIndex, in: searchable)
+            guard let match = regex.firstMatch(in: searchable, range: range) else { continue }
+
+            matches.append(SearchResult(
+                id: url.path,
+                filePath: url.path,
+                fileName: url.lastPathComponent,
+                title: url.lastPathComponent,
+                author: "",
+                snippet: snippet(in: searchable, around: match.range),
+                content: content,
+                fileSize: fileSize(at: url.path),
+                lastModified: nil
+            ))
+            if matches.count >= effectiveLimit { break }
+        }
+        return matches
+    }
+
+    private func fuzzyContentMatches(options: SearchOptions, excluding existing: Set<String>, limit: Int) -> [(score: Double, url: URL)] {
+        let terms = options.highlightTerms.map { $0.lowercased() }
+        guard terms.count > 1 else { return [] }
+
+        var matches: [(score: Double, url: URL)] = []
+        for url in allIndexedURLs() {
+            if existing.contains(url.path) { continue }
+            guard fileAllowed(url, extensions: options.allowedExtensions, folderPaths: options.folderPaths) else { continue }
+            let content = ((try? extractText(from: url)) ?? "").lowercased()
+            guard containsTermsInOrder(terms, in: content) else { continue }
+            matches.append((score: 0.25, url: url))
+            if matches.count >= limit { break }
+        }
+        return matches
+    }
+
+    private func containsTermsInOrder(_ terms: [String], in text: String) -> Bool {
+        var searchStart = text.startIndex
+        for term in terms {
+            guard let range = text.range(of: term, range: searchStart..<text.endIndex) else { return false }
+            searchStart = range.upperBound
+        }
+        return true
+    }
+
+    private func allIndexedURLs() -> [URL] {
+        ftsIndex.search(text: "*") ?? []
+    }
+
+    private func fileAllowed(_ url: URL, extensions: Set<String>?, folderPaths: Set<String>) -> Bool {
+        if let extensions, !extensions.contains(url.pathExtension.lowercased()) {
+            return false
+        }
+        guard !folderPaths.isEmpty else { return true }
+        let filePath = normalizedPath(url.path)
+        return folderPaths.contains { folderPath in
+            let folder = normalizedPath(folderPath)
+            return filePath == folder || filePath.hasPrefix(folder + "/")
+        }
+    }
+
+    private func normalizedPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
     // MARK: - Text Extraction
@@ -271,7 +361,7 @@ actor SearchEngine {
         return sheets.joined(separator: "\n\n")
     }
 
-    private func extractSnippet(path: String, query: String) -> String {
+    private func extractSnippet(path: String, options: SearchOptions) -> String {
         let url = URL(fileURLWithPath: path)
         let content: String
         if url.pathExtension.lowercased() == "pdf" {
@@ -282,15 +372,22 @@ actor SearchEngine {
         guard !content.isEmpty else { return "" }
 
         let lower = content.lowercased()
-        let terms = query.lowercased().split(separator: " ").map(String.init)
+        let terms = options.highlightTerms.map { $0.lowercased() }
         for term in terms {
             if let range = lower.range(of: term) {
-                let start = content.index(range.lowerBound, offsetBy: -60, limitedBy: content.startIndex) ?? content.startIndex
-                let end = content.index(range.upperBound, offsetBy: 140, limitedBy: content.endIndex) ?? content.endIndex
-                return String(content[start..<end]).replacingOccurrences(of: "\n", with: " ")
+                return snippet(in: content, around: NSRange(range, in: content))
             }
         }
         return String(content.prefix(200))
+    }
+
+    private func snippet(in content: String, around nsRange: NSRange) -> String {
+        guard let range = Range(nsRange, in: content) else {
+            return String(content.prefix(200)).replacingOccurrences(of: "\n", with: " ")
+        }
+        let start = content.index(range.lowerBound, offsetBy: -60, limitedBy: content.startIndex) ?? content.startIndex
+        let end = content.index(range.upperBound, offsetBy: 140, limitedBy: content.endIndex) ?? content.endIndex
+        return String(content[start..<end]).replacingOccurrences(of: "\n", with: " ")
     }
 
     private func fileSize(at path: String) -> Int64 {

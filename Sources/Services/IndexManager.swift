@@ -157,8 +157,14 @@ class IndexManager: ObservableObject {
         }
     }
 
+    func search(options: SearchOptions) async -> [SearchResult] {
+        await SearchEngine.shared.search(options: options)
+    }
+
     func search(query: String, fileTypeFilter: FileTypeFilter = .all) async -> [SearchResult] {
-        await SearchEngine.shared.search(query: query, fileTypeFilter: fileTypeFilter)
+        var options = SearchOptions(query: query)
+        options.selectedFileTypes = fileTypeFilter == .all ? [] : [fileTypeFilter]
+        return await SearchEngine.shared.search(options: options)
     }
 
     func files(in folder: IndexedFolder) -> [URL] {

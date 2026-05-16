@@ -55,7 +55,11 @@ class HTTPServer {
             if query.isEmpty {
                 return Self.jsonResponse(["results": [], "total": 0] as [String: Any])
             }
-            let results = await SearchEngine.shared.search(query: query, limit: 20)
+            let folderPaths = await indexedFolderPaths()
+            let results = await SearchEngine.shared.search(
+                options: SearchOptions(query: query, folderPaths: folderPaths),
+                limit: 20
+            )
             let items = results.map { r in
                 ["id": r.id, "fileName": r.fileName, "filePath": r.filePath, "snippet": r.snippet, "fileSize": r.fileSize] as [String: Any]
             }
@@ -64,7 +68,7 @@ class HTTPServer {
 
         if method == "GET" && path == "/api/status" {
             let count = await SearchEngine.shared.documentCount
-            let folders = await MainActor.run { IndexManager.shared?.indexedFolders.map { $0.path } ?? [] }
+            let folders = await indexedFolderPaths().sorted()
             return Self.jsonResponse(["ok": true, "documents": count, "folders": folders])
         }
 
@@ -108,11 +112,24 @@ class HTTPServer {
     }
 
     private func isPathAllowed(_ path: String) async -> Bool {
-        let folders = await MainActor.run { IndexManager.shared?.indexedFolders ?? [] }
-        return folders.contains { path.hasPrefix($0.path) }
+        let normalizedPath = Self.normalizedPath(path)
+        let folders = await indexedFolderPaths()
+        return folders.contains { folderPath in
+            normalizedPath == folderPath || normalizedPath.hasPrefix(folderPath + "/")
+        }
+    }
+
+    private func indexedFolderPaths() async -> Set<String> {
+        await MainActor.run {
+            Set((IndexManager.shared?.indexedFolders ?? []).map { Self.normalizedPath($0.path) })
+        }
     }
 
     // MARK: - Helpers
+
+    private static func normalizedPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
+    }
 
     private static func response(status: Int, body: String, contentType: String = "text/plain; charset=utf-8") -> String {
         let statusText = status == 200 ? "OK" : status == 404 ? "Not Found" : "Error"

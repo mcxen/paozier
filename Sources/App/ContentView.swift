@@ -7,7 +7,11 @@ struct ContentView: View {
     @State private var results: [SearchResult] = []
     @State private var selectedResult: SearchResult?
     @State private var isSearching = false
-    @State private var fileTypeFilter: FileTypeFilter = .all
+    @State private var selectedFileTypes: Set<FileTypeFilter> = []
+    @State private var selectedSearchFolderPath: String?
+    @State private var usesRegex = false
+    @State private var fuzzySpaces = true
+    @State private var showSearchOptions = false
     @State private var previewMode: PreviewMode = .live
     @State private var showCompendium = false
     @State private var showHistory = false
@@ -16,7 +20,17 @@ struct ContentView: View {
     enum PreviewMode { case live, pdf }
 
     private var searchTerms: [String] {
-        searchText.split(separator: " ").filter { !$0.hasPrefix("-") }.map { $0.replacingOccurrences(of: "\"", with: "") }
+        currentSearchOptions.highlightTerms
+    }
+
+    private var currentSearchOptions: SearchOptions {
+        SearchOptions(
+            query: searchText,
+            selectedFileTypes: selectedFileTypes,
+            folderPaths: selectedSearchFolderPath.map { Set([$0]) } ?? [],
+            usesRegex: usesRegex,
+            fuzzySpaces: fuzzySpaces
+        )
     }
 
     var body: some View {
@@ -49,6 +63,12 @@ struct ContentView: View {
         .onChange(of: indexManager.selectedFolder?.id) { _, _ in
             selectedResult = nil
         }
+        .onChange(of: indexManager.indexedFolders.map(\.path)) { _, paths in
+            if let selectedSearchFolderPath, !paths.contains(selectedSearchFolderPath) {
+                self.selectedSearchFolderPath = nil
+                rerunSearchIfNeeded()
+            }
+        }
     }
 
     // MARK: - Content Pane (Search + Results)
@@ -65,6 +85,16 @@ struct ContentView: View {
                     .font(.system(size: 13))
                     .focused($searchFieldFocused)
                     .onSubmit(performSearch)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) { showSearchOptions.toggle() }
+                } label: {
+                    Image(systemName: showSearchOptions ? "slider.horizontal.3" : "slider.horizontal.below.rectangle")
+                        .font(.system(size: 13))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(showSearchOptions || hasActiveSearchOptions ? Color.accentColor : .secondary)
+                .focusable(false)
+                .help("搜索条件")
                 if isSearching {
                     ProgressView().controlSize(.small)
                 }
@@ -94,28 +124,11 @@ struct ContentView: View {
 
             Divider()
 
-            // File type filter
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    ForEach(FileTypeFilter.allCases) { filter in
-                        Button(filter.rawValue) {
-                            withAnimation(.easeInOut(duration: 0.15)) { fileTypeFilter = filter }
-                            if !results.isEmpty { performSearch() }
-                        }
-                        .font(.system(size: 11, weight: fileTypeFilter == filter ? .semibold : .regular))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(fileTypeFilter == filter ? Color.accentColor.opacity(0.12) : Color.clear)
-                        .foregroundStyle(fileTypeFilter == filter ? Color.accentColor : .secondary)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+            if showSearchOptions {
+                searchOptionsPanel
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                Divider()
             }
-
-            Divider()
 
             // Results header
             if !results.isEmpty {
@@ -209,7 +222,7 @@ struct ContentView: View {
                     // Preview content with crossfade
                     Group {
                         if previewMode == .live {
-                            LivePreviewView(result: result, searchTerms: searchTerms)
+                            LivePreviewView(result: result, searchOptions: currentSearchOptions)
                         } else {
                             PDFPreviewView(filePath: result.filePath, searchTerms: searchTerms)
                         }
@@ -236,14 +249,139 @@ struct ContentView: View {
         }
     }
 
+    private var hasActiveSearchOptions: Bool {
+        !selectedFileTypes.isEmpty || selectedSearchFolderPath != nil || usesRegex || !fuzzySpaces
+    }
+
+    private var fileTypeSummary: String {
+        if selectedFileTypes.isEmpty { return "全部类型" }
+        return FileTypeFilter.allCases
+            .filter { selectedFileTypes.contains($0) && $0 != .all }
+            .map(\.rawValue)
+            .joined(separator: "、")
+    }
+
+    private var searchScopeSummary: String {
+        guard let selectedSearchFolderPath else { return "全部文件夹" }
+        return URL(fileURLWithPath: selectedSearchFolderPath).lastPathComponent
+    }
+
+    private var searchOptionsPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label("搜索条件", systemImage: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("\(searchScopeSummary) · \(fileTypeSummary)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                Spacer()
+                Toggle("正则", isOn: searchOptionBinding(\.usesRegex))
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 11))
+                Toggle("空格模糊", isOn: searchOptionBinding(\.fuzzySpaces))
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 11))
+            }
+
+            HStack(spacing: 8) {
+                Text("范围")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, alignment: .leading)
+                Picker("", selection: Binding(
+                    get: { selectedSearchFolderPath ?? "" },
+                    set: { newValue in
+                        selectedSearchFolderPath = newValue.isEmpty ? nil : newValue
+                        rerunSearchIfNeeded()
+                    }
+                )) {
+                    Text("全部已添加文件夹").tag("")
+                    ForEach(indexManager.indexedFolders) { folder in
+                        Text(URL(fileURLWithPath: folder.path).lastPathComponent).tag(folder.path)
+                    }
+                }
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 5) {
+                    ForEach(FileTypeFilter.allCases) { filter in
+                        Button(filter.rawValue) {
+                            toggleFileType(filter)
+                        }
+                        .font(.system(size: 11, weight: isFileTypeSelected(filter) ? .semibold : .regular))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(isFileTypeSelected(filter) ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.04))
+                        .foregroundStyle(isFileTypeSelected(filter) ? Color.accentColor : .secondary)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.65))
+    }
+
+    private func searchOptionBinding(_ keyPath: WritableKeyPath<SearchOptions, Bool>) -> Binding<Bool> {
+        Binding(
+            get: {
+                switch keyPath {
+                case \SearchOptions.usesRegex: return usesRegex
+                case \SearchOptions.fuzzySpaces: return fuzzySpaces
+                default: return false
+                }
+            },
+            set: { newValue in
+                switch keyPath {
+                case \SearchOptions.usesRegex: usesRegex = newValue
+                case \SearchOptions.fuzzySpaces: fuzzySpaces = newValue
+                default: break
+                }
+                rerunSearchIfNeeded()
+            }
+        )
+    }
+
+    private func isFileTypeSelected(_ filter: FileTypeFilter) -> Bool {
+        filter == .all ? selectedFileTypes.isEmpty : selectedFileTypes.contains(filter)
+    }
+
+    private func toggleFileType(_ filter: FileTypeFilter) {
+        withAnimation(.easeInOut(duration: 0.12)) {
+            if filter == .all {
+                selectedFileTypes.removeAll()
+            } else if selectedFileTypes.contains(filter) {
+                selectedFileTypes.remove(filter)
+            } else {
+                selectedFileTypes.insert(filter)
+            }
+        }
+        rerunSearchIfNeeded()
+    }
+
+    private func rerunSearchIfNeeded() {
+        if !results.isEmpty {
+            performSearch()
+        }
+        searchFieldFocused = true
+    }
+
     // MARK: - Search
 
     private func performSearch() {
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return }
         isSearching = true
+        let options = currentSearchOptions
         Task {
-            let items = await indexManager.search(query: q, fileTypeFilter: fileTypeFilter)
+            let items = await indexManager.search(options: options)
             await MainActor.run {
                 withAnimation(.smooth(duration: 0.25)) {
                     results = items
