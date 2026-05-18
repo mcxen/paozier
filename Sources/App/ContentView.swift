@@ -80,6 +80,12 @@ struct ContentView: View {
         .onChange(of: indexManager.selectedFolder?.id) { _, _ in
             selectedResult = nil
         }
+        .onChange(of: selectedResult) { _, newValue in
+            guard let newValue else { return }
+            primaryMatchStep = initialMatchIndex(for: newValue)
+            previewFindStep = 0
+            documentMatchJumpCycle = 0
+        }
         .onChange(of: indexManager.indexedFolders.map(\.path)) { _, paths in
             if let selectedSearchFolderPath, !paths.contains(selectedSearchFolderPath) {
                 self.selectedSearchFolderPath = nil
@@ -323,17 +329,54 @@ struct ContentView: View {
         let snippet: String
     }
 
+    private func initialMatchIndex(for result: SearchResult) -> Int {
+        let content = result.content.isEmpty ? result.snippet : result.content
+        let ranges = documentMatchRanges(in: content)
+        guard !ranges.isEmpty else { return 0 }
+
+        if let lineNumber = lineNumber(from: result.snippet) {
+            let targetOffset = characterOffset(forLine: lineNumber, in: content)
+            return ranges.enumerated()
+                .min { lhs, rhs in
+                    abs(content.distance(from: content.startIndex, to: lhs.element.lowerBound) - targetOffset) <
+                    abs(content.distance(from: content.startIndex, to: rhs.element.lowerBound) - targetOffset)
+                }?
+                .offset ?? 0
+        }
+
+        let cleanedSnippet = normalizedMatchText(result.snippet)
+        guard !cleanedSnippet.isEmpty else { return 0 }
+
+        let context = max(80, AppSettings.shared.matchContextChars)
+        return ranges.enumerated()
+            .map { idx, range in
+                let nearby = normalizedMatchText(snippetAround(range, in: content, context: context))
+                return (idx: idx, score: snippetSimilarityScore(cleanedSnippet, nearby))
+            }
+            .max { $0.score < $1.score }?
+            .idx ?? 0
+    }
+
     private func documentMatchSnippets(for result: SearchResult) -> [DocumentMatchSnippet] {
         let content = result.content.isEmpty ? result.snippet : result.content
         let context = max(0, AppSettings.shared.matchContextChars)
         guard !content.isEmpty else { return [] }
 
+        return documentMatchRanges(in: content)
+            .enumerated()
+            .map { idx, range in
+                DocumentMatchSnippet(id: idx, snippet: snippetAround(range, in: content, context: context))
+            }
+    }
+
+    private func documentMatchRanges(in content: String) -> [Range<String.Index>] {
+        guard !content.isEmpty else { return [] }
+
         if currentSearchOptions.usesRegex {
             guard let regex = try? NSRegularExpression(pattern: currentSearchOptions.trimmedQuery, options: [.caseInsensitive]) else { return [] }
             let range = NSRange(content.startIndex..<content.endIndex, in: content)
-            return regex.matches(in: content, range: range).enumerated().compactMap { idx, match in
-                guard let swiftRange = Range(match.range, in: content) else { return nil }
-                return DocumentMatchSnippet(id: idx, snippet: snippetAround(swiftRange, in: content, context: context))
+            return regex.matches(in: content, range: range).compactMap { match in
+                Range(match.range, in: content)
             }
         }
 
@@ -353,10 +396,54 @@ struct ContentView: View {
 
         return ranges
             .sorted { $0.lowerBound < $1.lowerBound }
-            .enumerated()
-            .map { idx, range in
-                DocumentMatchSnippet(id: idx, snippet: snippetAround(range, in: content, context: context))
+    }
+
+    private func lineNumber(from snippet: String) -> Int? {
+        guard let regex = try? NSRegularExpression(pattern: #"^\s*行\s*(\d+)\s*:"#) else { return nil }
+        let range = NSRange(snippet.startIndex..<snippet.endIndex, in: snippet)
+        guard let match = regex.firstMatch(in: snippet, range: range),
+              let numberRange = Range(match.range(at: 1), in: snippet) else { return nil }
+        return Int(snippet[numberRange])
+    }
+
+    private func characterOffset(forLine lineNumber: Int, in content: String) -> Int {
+        guard lineNumber > 1 else { return 0 }
+        var line = 1
+        var offset = 0
+        for char in content {
+            if line >= lineNumber { break }
+            offset += 1
+            if char.isNewline { line += 1 }
+        }
+        return offset
+    }
+
+    private func normalizedMatchText(_ text: String) -> String {
+        let withoutLinePrefix = text.replacingOccurrences(of: #"^\s*行\s*\d+\s*:\s*"#, with: "", options: .regularExpression)
+        let withoutFilenamePrefix = withoutLinePrefix.replacingOccurrences(of: #"^\s*文件名匹配\s*:\s*"#, with: "", options: .regularExpression)
+        return withoutFilenamePrefix
+            .lowercased()
+            .replacingOccurrences(of: #"[\s…\.]+"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func snippetSimilarityScore(_ needle: String, _ haystack: String) -> Int {
+        guard !needle.isEmpty, !haystack.isEmpty else { return 0 }
+        if haystack.contains(needle) { return needle.count }
+
+        let chars = Array(needle)
+        let maxLength = min(chars.count, 48)
+        guard maxLength >= 4 else { return haystack.contains(needle) ? needle.count : 0 }
+
+        for length in stride(from: maxLength, through: 4, by: -1) {
+            for start in 0...(chars.count - length) {
+                let fragment = String(chars[start..<(start + length)])
+                if haystack.contains(fragment) {
+                    return length
+                }
             }
+        }
+        return 0
     }
 
     private func snippetAround(_ range: Range<String.Index>, in content: String, context: Int) -> String {

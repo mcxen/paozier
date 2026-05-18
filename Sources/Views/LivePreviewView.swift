@@ -531,7 +531,6 @@ private struct MarkdownWebPreview: NSViewRepresentable {
 
     private static let markedScript: String = {
         let candidates = [
-            Bundle.module.url(forResource: "marked.umd", withExtension: "js"),
             Bundle.main.url(forResource: "marked.umd", withExtension: "js"),
             Bundle.main.resourceURL?.appendingPathComponent("Paozier_Paozier.bundle/Contents/Resources/marked.umd.js"),
             Bundle.main.resourceURL?.appendingPathComponent("Paozier_Paozier.bundle/marked.umd.js"),
