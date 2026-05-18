@@ -15,6 +15,8 @@ class AppSettings: ObservableObject, Codable {
     @Published var historyMaxItems: Int = 100
     @Published var excludedExtensions: [String] = []
     @Published var searchFilenames: Bool = true
+    @Published var languagePreference: String = AppLanguagePreference.system.rawValue
+    @Published var matchContextChars: Int = 40
 
     private static var filePath: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -26,7 +28,7 @@ class AppSettings: ObservableObject, Codable {
     enum CodingKeys: String, CodingKey {
         case searchResultLimit, searchEngineWeightSK, searchEngineWeightFTS
         case httpPort, httpAutoStart, mcpPort, mcpAutoStart
-        case defaultPreviewMode, historyMaxItems, excludedExtensions, searchFilenames
+        case defaultPreviewMode, historyMaxItems, excludedExtensions, searchFilenames, languagePreference, matchContextChars
     }
 
     init() { load() }
@@ -44,6 +46,8 @@ class AppSettings: ObservableObject, Codable {
         historyMaxItems = (try? c.decode(Int.self, forKey: .historyMaxItems)) ?? 100
         excludedExtensions = (try? c.decode([String].self, forKey: .excludedExtensions)) ?? []
         searchFilenames = (try? c.decode(Bool.self, forKey: .searchFilenames)) ?? true
+        languagePreference = (try? c.decode(String.self, forKey: .languagePreference)) ?? AppLanguagePreference.system.rawValue
+        matchContextChars = (try? c.decode(Int.self, forKey: .matchContextChars)) ?? 40
     }
 
     func encode(to encoder: Encoder) throws {
@@ -59,9 +63,12 @@ class AppSettings: ObservableObject, Codable {
         try c.encode(historyMaxItems, forKey: .historyMaxItems)
         try c.encode(excludedExtensions, forKey: .excludedExtensions)
         try c.encode(searchFilenames, forKey: .searchFilenames)
+        try c.encode(languagePreference, forKey: .languagePreference)
+        try c.encode(matchContextChars, forKey: .matchContextChars)
     }
 
     func save() {
+        UserDefaults.standard.set(languagePreference, forKey: "languagePreference")
         try? JSONEncoder().encode(self).write(to: Self.filePath)
     }
 
@@ -79,5 +86,8 @@ class AppSettings: ObservableObject, Codable {
         historyMaxItems = decoded.historyMaxItems
         excludedExtensions = decoded.excludedExtensions
         searchFilenames = decoded.searchFilenames
+        languagePreference = decoded.languagePreference
+        matchContextChars = decoded.matchContextChars
+        UserDefaults.standard.set(languagePreference, forKey: "languagePreference")
     }
 }

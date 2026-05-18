@@ -11,6 +11,8 @@ enum FileTypeFilter: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var displayName: String { L(rawValue) }
+
     var extensions: [String]? {
         switch self {
         case .all: return nil
@@ -44,7 +46,7 @@ struct SearchOptions: Hashable {
     }
 
     var searchScopeDescription: String {
-        folderPaths.isEmpty ? "全部文件夹" : "指定文件夹"
+        folderPaths.isEmpty ? L("全部文件夹") : L("指定文件夹")
     }
 
     var highlightTerms: [String] {
@@ -66,6 +68,11 @@ struct SearchResult: Identifiable, Hashable {
     let content: String
     let fileSize: Int64
     let lastModified: Date?
+}
+
+struct GrepBatchResult {
+    let results: [SearchResult]
+    let isFinal: Bool
 }
 
 struct IndexedFolder: Identifiable, Codable {
@@ -113,7 +120,7 @@ struct Compendium: Codable {
     var createdAt: Date
     var updatedAt: Date
 
-    init(name: String = "新报告") {
+    init(name: String = L("报告名称")) {
         self.name = name
         self.entries = []
         self.createdAt = Date()

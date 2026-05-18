@@ -13,7 +13,7 @@ struct ProximitySearchView: View {
                 Image(systemName: "arrow.left.and.right")
                     .foregroundStyle(.orange)
                     .font(.callout)
-                Text("邻近搜索")
+                Text(L("邻近搜索"))
                     .font(.callout.weight(.medium))
                 Spacer()
                 Toggle("", isOn: $isActive)
@@ -23,23 +23,23 @@ struct ProximitySearchView: View {
 
             if isActive {
                 HStack(spacing: 8) {
-                    TextField("词语 1", text: $term1)
+                    TextField(L("词语 1"), text: $term1)
                         .textFieldStyle(.roundedBorder)
                         .font(.callout)
                     Text("↔")
                         .foregroundStyle(.secondary)
-                    TextField("词语 2", text: $term2)
+                    TextField(L("词语 2"), text: $term2)
                         .textFieldStyle(.roundedBorder)
                         .font(.callout)
                 }
 
                 VStack(spacing: 4) {
                     HStack {
-                        Text("词距")
+                        Text(L("词距"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text("\(Int(distance)) 词")
+                        Text(LF("%d 词", Int(distance)))
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -50,7 +50,7 @@ struct ProximitySearchView: View {
                 Button {
                     onSearch()
                 } label: {
-                    Label("搜索", systemImage: "magnifyingglass")
+                    Label(L("搜索"), systemImage: "magnifyingglass")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)

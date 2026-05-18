@@ -9,17 +9,17 @@ struct CompendiumView: View {
             HStack {
                 Image(systemName: "doc.text.image")
                     .foregroundStyle(.blue)
-                TextField("报告名称", text: $dataManager.compendium.name)
+                TextField(L("报告名称"), text: $dataManager.compendium.name)
                     .textFieldStyle(.plain)
                     .font(.headline)
                 Spacer()
-                Text("\(dataManager.compendium.entries.count) 条摘录")
+                Text(LF("%d 条摘录", dataManager.compendium.entries.count))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button("导出") { dataManager.exportCompendiumToFile() }
+                Button(L("导出")) { dataManager.exportCompendiumToFile() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                Button("关闭") { dismiss() }
+                Button(L("关闭")) { dismiss() }
                     .controlSize(.small)
             }
             .padding(12)
@@ -32,7 +32,7 @@ struct CompendiumView: View {
                     Image(systemName: "tray")
                         .font(.system(size: 32, weight: .thin))
                         .foregroundStyle(.quaternary)
-                    Text("搜索时点击「添加到报告」收集摘录")
+                    Text(L("搜索时点击「添加到报告」收集摘录"))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -56,13 +56,13 @@ struct CompendiumView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(4)
-                            Text("搜索: \(entry.query)")
+                            Text(LF("搜索: %@", entry.query))
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
                         .padding(.vertical, 4)
                         .contextMenu {
-                            Button("移除") { dataManager.removeFromCompendium(id: entry.id) }
+                            Button(L("移除")) { dataManager.removeFromCompendium(id: entry.id) }
                         }
                     }
                 }

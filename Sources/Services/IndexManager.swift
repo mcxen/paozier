@@ -11,7 +11,7 @@ class IndexManager: ObservableObject {
     @Published var indexedFolders: [IndexedFolder] = []
     @Published var selectedFolder: IndexedFolder?
     @Published var totalDocs: Int = 0
-    @Published var statusMessage = "就绪"
+    @Published var statusMessage = L("就绪")
     @Published var httpRunning = false
     @Published var mcpRunning = false
     @Published var indexingFolderName = ""
@@ -54,7 +54,7 @@ class IndexManager: ObservableObject {
         defer { isStartingUp = false }
 
         let s = AppSettings.shared
-        statusMessage = "初始化搜索引擎..."
+        statusMessage = L("初始化搜索引擎...")
         await SearchEngine.shared.updateSettings(
             limit: s.searchResultLimit,
             skWeight: s.searchEngineWeightSK,
@@ -66,7 +66,7 @@ class IndexManager: ObservableObject {
         }.value
         totalDocs = await SearchEngine.shared.documentCount
         isReady = true
-        statusMessage = "就绪 · \(totalDocs) 个文档"
+        statusMessage = LF("就绪 · %d 个文档", totalDocs)
         startHTTP()
         startMCP()
     }
@@ -120,10 +120,10 @@ class IndexManager: ObservableObject {
     }
 
     func removeFolder(_ folder: IndexedFolder) {
-        let files = findFiles(in: URL(fileURLWithPath: folder.path))
         Task {
-            await SearchEngine.shared.removeFiles(at: files)
+            await SearchEngine.shared.removeFiles(inFolderPath: folder.path)
             totalDocs = await SearchEngine.shared.documentCount
+            statusMessage = L("已移除文件夹")
         }
         indexedFolders.removeAll { $0.id == folder.id }
         if selectedFolder?.id == folder.id {
@@ -132,14 +132,24 @@ class IndexManager: ObservableObject {
         saveFolders()
     }
 
+    func clearFolderIndex(_ folder: IndexedFolder) async {
+        await SearchEngine.shared.removeFiles(inFolderPath: folder.path)
+        totalDocs = await SearchEngine.shared.documentCount
+        statusMessage = L("已清理文件夹索引")
+        if let idx = indexedFolders.firstIndex(where: { $0.id == folder.id }) {
+            indexedFolders[idx].lastIndexed = nil
+            saveFolders()
+        }
+    }
+
     func indexFolder(_ folder: IndexedFolder) async {
         if isIndexing {
-            statusMessage = "已有索引任务正在运行..."
+            statusMessage = L("已有索引任务正在运行...")
             return
         }
 
         if !isReady {
-            statusMessage = "等待搜索引擎初始化..."
+            statusMessage = L("等待搜索引擎初始化...")
             await startup()
         }
 
@@ -149,7 +159,7 @@ class IndexManager: ObservableObject {
         indexingFileCount = 0
         indexingTotalFiles = 0
         indexingFailedCount = 0
-        statusMessage = "扫描文件..."
+        statusMessage = L("扫描文件...")
         defer {
             isIndexing = false
             indexingFolderName = ""
@@ -163,7 +173,7 @@ class IndexManager: ObservableObject {
         indexingTotalFiles = total
 
         if total == 0 {
-            statusMessage = "未找到支持的文件"
+            statusMessage = L("未找到支持的文件")
             return
         }
 
@@ -183,7 +193,7 @@ class IndexManager: ObservableObject {
                 indexProgress = Double(completed) / Double(total)
                 indexingFileCount = completed
                 indexingFailedCount = failed
-                statusMessage = "索引中 \(completed)/\(total)"
+                statusMessage = LF("索引中 %d/%d", completed, total)
                 lastUIUpdate = Date()
             }
         }
@@ -197,7 +207,7 @@ class IndexManager: ObservableObject {
         }
 
         totalDocs = await SearchEngine.shared.documentCount
-        statusMessage = failed > 0 ? "索引完成 · \(totalDocs) 个文档 · \(failed) 个失败" : "索引完成 · \(totalDocs) 个文档"
+        statusMessage = failed > 0 ? LF("索引完成 · %d 个文档 · %d 个失败", totalDocs, failed) : LF("索引完成 · %d 个文档", totalDocs)
     }
 
     func reindexAll() async {
@@ -209,6 +219,15 @@ class IndexManager: ObservableObject {
 
     func search(options: SearchOptions) async -> [SearchResult] {
         await SearchEngine.shared.search(options: options)
+    }
+
+    func grepSearch(options: SearchOptions) async -> AsyncStream<GrepBatchResult> {
+        return await GrepSearchEngine.shared.search(
+            query: options.trimmedQuery,
+            folderPaths: indexedFolders.map(\.path),
+            allowedExtensions: options.allowedExtensions,
+            isRegex: options.usesRegex
+        )
     }
 
     func search(query: String, fileTypeFilter: FileTypeFilter = .all) async -> [SearchResult] {

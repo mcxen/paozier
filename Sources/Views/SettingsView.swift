@@ -18,7 +18,7 @@ final class SettingsWindowController {
             backing: .buffered,
             defer: false
         )
-        w.title = "Paozier 设置"
+        w.title = L("Paozier 设置")
         w.center()
         w.contentView = NSHostingView(rootView: SettingsView())
         w.isReleasedWhenClosed = false
@@ -39,20 +39,20 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: "gearshape.fill").foregroundStyle(.blue)
-                Text("设置").font(.headline)
+                Text(L("设置")).font(.headline)
                 Spacer()
-                Button("完成") { NSApp.keyWindow?.close() }.buttonStyle(.borderedProminent).controlSize(.small)
+                Button(L("完成")) { NSApp.keyWindow?.close() }.buttonStyle(.borderedProminent).controlSize(.small)
             }
             .padding(12)
             .background(.bar)
             Divider()
 
             TabView {
-                generalTab.tabItem { Label("通用", systemImage: "slider.horizontal.3") }
-                searchTab.tabItem { Label("搜索", systemImage: "magnifyingglass") }
-                servicesTab.tabItem { Label("服务", systemImage: "network") }
-                indexTab.tabItem { Label("索引", systemImage: "tray.full") }
-                dataTab.tabItem { Label("数据", systemImage: "externaldrive") }
+                generalTab.tabItem { Label(L("通用"), systemImage: "slider.horizontal.3") }
+                searchTab.tabItem { Label(L("搜索"), systemImage: "magnifyingglass") }
+                servicesTab.tabItem { Label(L("服务"), systemImage: "network") }
+                indexTab.tabItem { Label(L("索引"), systemImage: "tray.full") }
+                dataTab.tabItem { Label(L("数据"), systemImage: "externaldrive") }
             }
             .padding(16)
         }
@@ -68,20 +68,29 @@ struct SettingsView: View {
         .onChange(of: settings.historyMaxItems) { _, _ in settings.save() }
         .onChange(of: settings.excludedExtensions) { _, _ in settings.save() }
         .onChange(of: settings.searchFilenames) { _, _ in settings.save() }
+        .onChange(of: settings.languagePreference) { _, _ in settings.save() }
+        .onChange(of: settings.matchContextChars) { _, _ in settings.save() }
     }
 
     // MARK: - General
 
     private var generalTab: some View {
         Form {
-            Section("预览") {
-                Picker("默认预览模式", selection: $settings.defaultPreviewMode) {
-                    Text("Live Preview").tag("live")
-                    Text("原文件").tag("pdf")
+            Section(L("语言")) {
+                Picker(L("界面语言"), selection: $settings.languagePreference) {
+                    ForEach(AppLanguagePreference.allCases) { preference in
+                        Text(preference.displayName).tag(preference.rawValue)
+                    }
                 }
             }
-            Section("历史记录") {
-                Stepper("最大记录数: \(settings.historyMaxItems)", value: $settings.historyMaxItems, in: 10...1000, step: 10)
+            Section(L("预览")) {
+                Picker(L("默认预览模式"), selection: $settings.defaultPreviewMode) {
+                    Text("Live Preview").tag("live")
+                    Text(L("原文件")).tag("pdf")
+                }
+            }
+            Section(L("历史记录")) {
+                Stepper(LF("最大记录数: %d", settings.historyMaxItems), value: $settings.historyMaxItems, in: 10...1000, step: 10)
             }
         }
         .formStyle(.grouped)
@@ -91,10 +100,11 @@ struct SettingsView: View {
 
     private var searchTab: some View {
         Form {
-            Section("结果") {
-                Stepper("最大结果数: \(settings.searchResultLimit)", value: $settings.searchResultLimit, in: 5...200, step: 5)
+            Section(L("结果")) {
+                Stepper(LF("最大结果数: %d", settings.searchResultLimit), value: $settings.searchResultLimit, in: 5...200, step: 5)
+                Stepper(LF("命中上下文字符数: %d", settings.matchContextChars), value: $settings.matchContextChars, in: 10...200, step: 5)
             }
-            Section("引擎权重") {
+            Section(L("引擎权重")) {
                 HStack {
                     Text("SearchKit")
                     Slider(value: $settings.searchEngineWeightSK, in: 0...1, step: 0.1)
@@ -105,10 +115,10 @@ struct SettingsView: View {
                     Slider(value: $settings.searchEngineWeightFTS, in: 0...1, step: 0.1)
                     Text(String(format: "%.1f", settings.searchEngineWeightFTS)).monospacedDigit().frame(width: 30)
                 }
-                Text("权重决定双引擎结果的融合排序比例").font(.caption).foregroundStyle(.secondary)
+                Text(L("权重决定双引擎结果的融合排序比例")).font(.caption).foregroundStyle(.secondary)
             }
-            Section("范围") {
-                Toggle("同时搜索文件名", isOn: $settings.searchFilenames)
+            Section(L("范围")) {
+                Toggle(L("同时搜索文件名"), isOn: $settings.searchFilenames)
             }
         }
         .formStyle(.grouped)
@@ -118,24 +128,24 @@ struct SettingsView: View {
 
     private var servicesTab: some View {
         Form {
-            Section("HTTP 搜索服务") {
+            Section(L("HTTP 搜索服务")) {
                 HStack {
-                    Text("端口")
+                    Text(L("端口"))
                     TextField("", value: $settings.httpPort, format: .number).frame(width: 80).textFieldStyle(.roundedBorder)
                 }
-                Toggle("启动时自动开启", isOn: $settings.httpAutoStart)
+                Toggle(L("启动时自动开启"), isOn: $settings.httpAutoStart)
             }
-            Section("MCP AI 工具服务") {
+            Section(L("MCP AI 工具服务")) {
                 HStack {
-                    Text("端口")
+                    Text(L("端口"))
                     TextField("", value: $settings.mcpPort, format: .number).frame(width: 80).textFieldStyle(.roundedBorder)
                 }
-                Toggle("启动时自动开启", isOn: $settings.mcpAutoStart)
+                Toggle(L("启动时自动开启"), isOn: $settings.mcpAutoStart)
             }
-            Section("MCP 配置 (复制到 AI 工具)") {
+            Section(L("MCP 配置 (复制到 AI 工具)")) {
                 MCPConfigView(port: settings.mcpPort)
             }
-            Text("端口修改需重启应用生效").font(.caption).foregroundStyle(.secondary)
+            Text(L("端口修改需重启应用生效")).font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
     }
@@ -144,10 +154,10 @@ struct SettingsView: View {
 
     private var indexTab: some View {
         Form {
-            Section("排除的文件扩展名") {
+            Section(L("排除的文件扩展名")) {
                 HStack {
-                    TextField("扩展名（如 log）", text: $newExtension).textFieldStyle(.roundedBorder)
-                    Button("添加") {
+                    TextField(L("扩展名（如 log）"), text: $newExtension).textFieldStyle(.roundedBorder)
+                    Button(L("添加")) {
                         let ext = newExtension.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: ".", with: "")
                         if !ext.isEmpty && !settings.excludedExtensions.contains(ext) {
                             settings.excludedExtensions.append(ext)
@@ -156,7 +166,7 @@ struct SettingsView: View {
                     }.disabled(newExtension.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 if settings.excludedExtensions.isEmpty {
-                    Text("无排除项 — 所有支持格式均会被索引").font(.caption).foregroundStyle(.secondary)
+                    Text(L("无排除项 — 所有支持格式均会被索引")).font(.caption).foregroundStyle(.secondary)
                 } else {
                     FlowLayout(spacing: 4) {
                         ForEach(settings.excludedExtensions, id: \.self) { ext in
@@ -180,24 +190,24 @@ struct SettingsView: View {
 
     private var dataTab: some View {
         Form {
-            Section("清除数据") {
-                Button("清除搜索历史") { clearTarget = "history"; showClearConfirm = true }
-                Button("清除报告数据") { clearTarget = "compendium"; showClearConfirm = true }
-                Button("重建全部索引") { clearTarget = "index"; showClearConfirm = true }
+            Section(L("清除数据")) {
+                Button(L("清除搜索历史")) { clearTarget = "history"; showClearConfirm = true }
+                Button(L("清除报告数据")) { clearTarget = "compendium"; showClearConfirm = true }
+                Button(L("重建全部索引")) { clearTarget = "index"; showClearConfirm = true }
                     .foregroundStyle(.red)
             }
-            Section("存储位置") {
+            Section(L("存储位置")) {
                 HStack {
                     Text("~/Library/Application Support/Paozier/").font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Button("打开") { NSWorkspace.shared.open(dataDirectory) }.controlSize(.small)
+                    Button(L("打开")) { NSWorkspace.shared.open(dataDirectory) }.controlSize(.small)
                 }
             }
         }
         .formStyle(.grouped)
-        .alert("确认操作", isPresented: $showClearConfirm) {
-            Button("取消", role: .cancel) {}
-            Button("确认", role: .destructive) { performClear() }
+        .alert(L("确认操作"), isPresented: $showClearConfirm) {
+            Button(L("取消"), role: .cancel) {}
+            Button(L("确认"), role: .destructive) { performClear() }
         } message: {
             Text(clearMessage)
         }
@@ -210,9 +220,9 @@ struct SettingsView: View {
 
     private var clearMessage: String {
         switch clearTarget {
-        case "history": return "将清除所有搜索历史记录"
-        case "compendium": return "将清除所有报告数据"
-        case "index": return "将删除并重建全部索引，耗时较长"
+        case "history": return L("将清除所有搜索历史记录")
+        case "compendium": return L("将清除所有报告数据")
+        case "index": return L("将删除并重建全部索引，耗时较长")
         default: return ""
         }
     }
@@ -262,13 +272,13 @@ struct MCPConfigView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("TCP 连接方式 (Claude Desktop / Cline / Cursor)").font(.caption).foregroundStyle(.secondary)
+            Text(L("TCP 连接方式 (Claude Desktop / Cline / Cursor)")).font(.caption).foregroundStyle(.secondary)
             HStack {
                 Text(httpConfigJSON).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
                     .padding(6).frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: 4).fill(.quaternary))
                 Spacer()
-                Button(copied ? "已复制" : "复制") {
+                Button(copied ? L("已复制") : L("复制")) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(httpConfigJSON, forType: .string)
                     copied = true

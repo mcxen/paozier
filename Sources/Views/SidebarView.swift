@@ -14,23 +14,23 @@ struct SidebarView: View {
             Divider()
 
             List {
-                Section { statusCard } header: { sectionLabel("引擎", "gearshape") }
+                Section { statusCard } header: { sectionLabel(L("引擎"), "gearshape") }
 
                 Section {
                     ForEach(indexManager.indexedFolders) { folder in
                         folderRow(folder)
                         .buttonStyle(.plain)
                         .contextMenu {
-                            Button("查看内容") { indexManager.selectedFolder = folder }
-                            Button("重新索引") { Task { await indexManager.indexFolder(folder) } }
-                            Button("刷新文件数量") { indexManager.refreshFolderCounts() }
-                            Button("移除") { indexManager.removeFolder(folder) }
-                            Button("在 Finder 中显示") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder.path) }
+                            Button(L("查看文件")) { indexManager.selectedFolder = folder }
+                            Button(L("重新索引")) { Task { await indexManager.indexFolder(folder) } }
+                            Button(L("刷新文件数量")) { indexManager.refreshFolderCounts() }
+                            Button(L("移除")) { indexManager.removeFolder(folder) }
+                            Button(L("在 Finder 中显示")) { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder.path) }
                         }
                     }
 
                     Button { indexManager.addFolder() } label: {
-                        Label("添加文件夹", systemImage: "plus.circle")
+                        Label(L("添加文件夹"), systemImage: "plus.circle")
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(.blue)
@@ -40,24 +40,24 @@ struct SidebarView: View {
                     DisclosureGroup(isExpanded: $showServices) {
                         serviceRow("HTTP", port: indexManager.httpServer.port, isOn: Binding(get: { indexManager.httpRunning }, set: { $0 ? indexManager.startHTTP() : indexManager.stopHTTP() }))
                         if indexManager.httpRunning {
-                            Link("打开网页搜索", destination: URL(string: "http://localhost:\(indexManager.httpServer.port)")!)
+                            Link(L("打开网页搜索"), destination: URL(string: "http://localhost:\(indexManager.httpServer.port)")!)
                                 .font(.caption)
                         }
                         serviceRow("MCP", port: indexManager.mcpServer.port, isOn: Binding(get: { indexManager.mcpRunning }, set: { $0 ? indexManager.startMCP() : indexManager.stopMCP() }))
                     } label: {
-                        Label("服务", systemImage: "network")
+                        Label(L("服务"), systemImage: "network")
                             .font(.caption.weight(.semibold))
                     }
                 }
 
                 Section {
                     DisclosureGroup(isExpanded: $showFormats) {
-                        Text("PDF · Word · TXT · MD · HTML · JSON · XML · CSV · RTF · EPUB · 代码文件")
+                        Text("PDF · Word · TXT · MD · HTML · JSON · XML · CSV · RTF · EPUB · \(L("代码文件"))")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     } label: {
-                        Label("支持格式", systemImage: "doc.on.doc")
+                        Label(L("支持格式"), systemImage: "doc.on.doc")
                             .font(.caption.weight(.semibold))
                     }
                 }
@@ -82,7 +82,7 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("设置")
+            .help(L("设置"))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -94,7 +94,7 @@ struct SidebarView: View {
             Button {
                 activePane = .search
             } label: {
-                Label("搜索", systemImage: "magnifyingglass")
+                Label(L("搜索"), systemImage: "magnifyingglass")
                     .labelStyle(.titleAndIcon)
                     .frame(maxWidth: .infinity)
             }
@@ -105,7 +105,7 @@ struct SidebarView: View {
             Button {
                 activePane = .index
             } label: {
-                Label("索引", systemImage: "chart.bar.doc.horizontal")
+                Label(L("索引"), systemImage: "chart.bar.doc.horizontal")
                     .labelStyle(.titleAndIcon)
                     .frame(maxWidth: .infinity)
             }
@@ -124,7 +124,7 @@ struct SidebarView: View {
                 Circle()
                     .fill(indexManager.isIndexing ? Color.blue : (indexManager.isReady ? .green : .orange))
                     .frame(width: 8, height: 8)
-                Text(indexManager.isIndexing ? "索引中" : (indexManager.isReady ? "就绪" : "初始化"))
+                Text(indexManager.isIndexing ? L("索引中") : (indexManager.isReady ? L("就绪") : L("初始化")))
                     .font(.caption.weight(.semibold))
                 Spacer()
                 Text("\(indexManager.totalDocs.formatted())")
@@ -145,7 +145,7 @@ struct SidebarView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 if indexManager.indexingFailedCount > 0 {
-                    Text("\(indexManager.indexingFailedCount) 个文件失败")
+                    Text(LF("%d 个文件失败", indexManager.indexingFailedCount))
                         .font(.caption2)
                         .foregroundStyle(.orange)
                 }
@@ -161,7 +161,7 @@ struct SidebarView: View {
 
     private var foldersHeader: some View {
         HStack {
-            sectionLabel("文件夹", "folder")
+            sectionLabel(L("文件夹"), "folder")
             Spacer()
             Button {
                 Task { await indexManager.reindexAll() }
@@ -170,7 +170,7 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .disabled(indexManager.isIndexing)
-            .help("重新索引全部")
+            .help(L("重新索引全部"))
         }
     }
 
@@ -188,7 +188,7 @@ struct SidebarView: View {
                         .font(.callout.weight(indexManager.selectedFolder?.id == folder.id ? .semibold : .regular))
                         .lineLimit(1)
                     HStack(spacing: 4) {
-                        Text("\(folder.fileCount) 文件")
+                        Text(LF("%d 文件", folder.fileCount))
                         if let lastIndexed = folder.lastIndexed {
                             Text("·")
                             Text(lastIndexed, style: .relative)

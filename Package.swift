@@ -12,7 +12,8 @@ let package = Package(
         .executableTarget(
             name: "Paozier",
             dependencies: ["DSFFullTextSearchIndex", "DFSearchKit"],
-            path: "Sources"
+            path: "Sources",
+            resources: [.process("Resources")]
         )
     ]
 )

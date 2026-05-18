@@ -17,7 +17,7 @@ struct FolderContentView: View {
                         Text(URL(fileURLWithPath: folder.path).lastPathComponent)
                             .font(.callout.weight(.medium))
                             .lineLimit(1)
-                        Text("\(files.count) 个支持文件")
+                        Text(LF("%d 个支持文件", files.count))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -26,7 +26,7 @@ struct FolderContentView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                     .buttonStyle(.borderless)
-                    .help("刷新")
+                    .help(L("刷新"))
                 }
                 .padding(10)
                 .background(.regularMaterial)
@@ -34,14 +34,14 @@ struct FolderContentView: View {
                 Divider()
 
                 if files.isEmpty {
-                    ContentUnavailableView("没有可预览文件", systemImage: "doc.questionmark")
+                    ContentUnavailableView(L("没有可预览文件"), systemImage: "doc.questionmark")
                 } else {
                     List(files, id: \.path, selection: $selectedFile) { file in
                         FolderFileRow(fileURL: file)
                             .tag(file)
                             .contextMenu {
-                                Button("打开文件") { NSWorkspace.shared.open(file) }
-                                Button("在 Finder 中显示") { NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "") }
+                                Button(L("打开文件")) { NSWorkspace.shared.open(file) }
+                                Button(L("在 Finder 中显示")) { NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "") }
                             }
                     }
                     .listStyle(.plain)
@@ -63,7 +63,7 @@ struct FolderContentView: View {
                         }
                         Spacer()
                         Button { NSWorkspace.shared.open(selectedFile) } label: {
-                            Label("打开", systemImage: "arrow.up.right.square")
+                            Label(L("打开"), systemImage: "arrow.up.right.square")
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -79,7 +79,7 @@ struct FolderContentView: View {
                     Divider()
                     PDFPreviewView(filePath: selectedFile.path)
                 } else {
-                    ContentUnavailableView("选择文件预览", systemImage: "doc.text.magnifyingglass")
+                    ContentUnavailableView(L("选择文件预览"), systemImage: "doc.text.magnifyingglass")
                 }
             }
             .frame(minWidth: 420)

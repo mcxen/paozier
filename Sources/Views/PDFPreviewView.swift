@@ -52,7 +52,7 @@ struct PDFPreviewView: View {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.title)
                     .foregroundStyle(.secondary)
-                Text("无法加载文件")
+                Text(L("无法加载文件"))
                     .foregroundStyle(.secondary)
                 Text(filePath)
                     .font(.caption)
@@ -68,13 +68,13 @@ struct TextFilePreview: View {
     let filePath: String
 
     private var content: String {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: filePath)) else { return "无法读取文件内容" }
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: filePath)) else { return L("无法读取文件内容") }
         for encoding in [String.Encoding.utf8, .unicode, .utf16LittleEndian, .utf16BigEndian, .isoLatin1, .windowsCP1252] {
             if let text = String(data: data, encoding: encoding) {
                 return text
             }
         }
-        return "无法识别文本编码"
+        return L("无法识别文本编码")
     }
 
     var body: some View {
@@ -154,11 +154,11 @@ struct TextFilePreviewNS: NSViewRepresentable {
     }
 
     private func loadContent() -> String {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: filePath)) else { return "无法读取文件内容" }
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: filePath)) else { return L("无法读取文件内容") }
         for encoding in [String.Encoding.utf8, .unicode, .utf16LittleEndian, .utf16BigEndian, .isoLatin1, .windowsCP1252] {
             if let text = String(data: data, encoding: encoding) { return text }
         }
-        return "无法识别文本编码"
+        return L("无法识别文本编码")
     }
 }
 
@@ -226,7 +226,7 @@ struct DocxPreviewNS: NSViewRepresentable {
 
     private func extractDocxContent() -> String {
         let url = URL(fileURLWithPath: filePath)
-        guard let entries = try? unzipEntries(in: url) else { return "无法读取文档" }
+        guard let entries = try? unzipEntries(in: url) else { return L("无法读取文档") }
         let prefixes = ["word/document", "word/header", "word/footer"]
         let contentEntries = entries
             .filter { e in e.hasSuffix(".xml") && prefixes.contains(where: { e.hasPrefix($0) }) }

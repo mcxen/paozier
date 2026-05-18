@@ -10,6 +10,7 @@ class MCPServer {
     private static let toolsJSON = """
     [
       {"name":"search_documents","description":"Full-text search across all indexed documents. Returns structured results optimized for LLM consumption with exact-match snippets.","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search keywords"},"limit":{"type":"integer","description":"Max results (default 10)"},"context_chars":{"type":"integer","description":"Characters of context before/after each match (default 100)"},"include_content":{"type":"boolean","description":"Include full document text in results (default false)"},"max_content_length":{"type":"integer","description":"Max chars of full content per result when include_content=true (default 8000)"}},"required":["query"]}},
+      {"name":"grep_search","description":"Fast direct grep search across files in indexed folders. Finds recently changed files without waiting for indexing.","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search keywords or regex"},"limit":{"type":"integer","description":"Max results (default 20)"},"regex":{"type":"boolean","description":"Treat query as regex (default false)"},"extensions":{"type":"string","description":"Filter by extensions (comma-separated)"}},"required":["query"]}},
       {"name":"get_document_content","description":"Read the full text content of a file by path.","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute file path"}},"required":["path"]}},
       {"name":"index_folder","description":"Add a folder to the search index. Recursively indexes all supported files.","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute folder path"}},"required":["path"]}},
       {"name":"list_indexed_folders","description":"List all currently indexed folders with file counts.","inputSchema":{"type":"object","properties":{}}},
@@ -110,6 +111,38 @@ class MCPServer {
                 return entry
             }
             return "# Search Results for: \(query)\nFound \(results.count) result(s)\n\n" + structured.joined(separator: "\n\n---\n\n")
+
+        case "grep_search":
+            let query = arguments["query"] as? String ?? ""
+            let limit = arguments["limit"] as? Int ?? 20
+            let isRegex = arguments["regex"] as? Bool ?? false
+            let extensions = (arguments["extensions"] as? String)?
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+            let folders = await MainActor.run { IndexManager.shared?.indexedFolders.map(\.path) ?? [] }
+            let stream = await GrepSearchEngine.shared.search(
+                query: query,
+                folderPaths: folders,
+                allowedExtensions: extensions.map(Set.init),
+                isRegex: isRegex
+            )
+            var results: [SearchResult] = []
+            for await batch in stream {
+                results.append(contentsOf: batch.results)
+                if results.count >= limit { break }
+            }
+            results = Array(results.prefix(limit))
+            if results.isEmpty { return "No grep results found for: \(query)" }
+            let lines = results.enumerated().map { idx, r in
+                """
+                ## Result \(idx + 1): \(r.fileName)
+                - path: \(r.filePath)
+                - size: \(formatSize(r.fileSize))
+                - match: \(r.snippet)
+                """
+            }
+            return "# Grep Search Results for: \(query)\nFound \(results.count) result(s)\n\n" + lines.joined(separator: "\n\n---\n\n")
 
         case "get_document_content":
             let path = arguments["path"] as? String ?? ""

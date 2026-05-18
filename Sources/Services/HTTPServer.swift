@@ -65,6 +65,33 @@ class HTTPServer {
             return Self.jsonResponse(["results": items, "total": items.count, "query": query])
         }
 
+        if method == "GET" && path.hasPrefix("/api/grep_search") {
+            let query = Self.queryParam(from: path, key: "q") ?? ""
+            if query.isEmpty {
+                return Self.jsonResponse(["results": [], "total": 0] as [String: Any])
+            }
+            let limit = Int(Self.queryParam(from: path, key: "limit") ?? "") ?? 50
+            let isRegex = Self.queryParam(from: path, key: "regex") == "1" || Self.queryParam(from: path, key: "regex") == "true"
+            let folders = await indexedFolderPaths().sorted()
+            let stream = await GrepSearchEngine.shared.search(
+                query: query,
+                folderPaths: folders,
+                allowedExtensions: nil,
+                isRegex: isRegex
+            )
+            var results: [SearchResult] = []
+            for await batch in stream {
+                results.append(contentsOf: batch.results)
+                if results.count >= limit { break }
+            }
+            results = Array(results.prefix(limit))
+            let items = results.map { r in
+                ["id": r.id, "fileName": r.fileName, "filePath": r.filePath, "snippet": r.snippet, "fileSize": r.fileSize] as [String: Any]
+            }
+            rememberResultPaths(results.map(\.filePath))
+            return Self.jsonResponse(["results": items, "total": items.count, "query": query, "engine": "grep"])
+        }
+
         if method == "GET" && path == "/api/status" {
             let count = await SearchEngine.shared.documentCount
             let folders = await indexedFolderPaths().sorted()

@@ -24,7 +24,7 @@ final class QuickSearchPanelController {
                 backing: .buffered,
                 defer: false
             )
-            panel.title = "快速搜索"
+            panel.title = L("快速搜索")
             panel.isFloatingPanel = true
             panel.level = .floating
             panel.hidesOnDeactivate = false
@@ -48,7 +48,7 @@ struct QuickSearchPanelView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("搜索...", text: $query)
+                TextField(L("搜索..."), text: $query)
                     .textFieldStyle(.plain)
                     .font(.body)
                     .onSubmit(search)
@@ -64,7 +64,7 @@ struct QuickSearchPanelView: View {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.system(size: 28, weight: .thin))
                         .foregroundStyle(.quaternary)
-                    Text(query.isEmpty ? "输入关键词快速搜索" : "无结果")
+                    Text(query.isEmpty ? L("输入关键词快速搜索") : L("无结果"))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

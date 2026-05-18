@@ -46,6 +46,10 @@ mkdir -p "$MACOS" "$RESOURCES"
 cp "$BINARY" "$MACOS/$APP_NAME"
 chmod +x "$MACOS/$APP_NAME"
 
+# Copy SwiftPM resource bundles used by Bundle.module
+BUILD_PRODUCT_DIR="$(dirname "$BINARY")"
+find "$BUILD_PRODUCT_DIR" -maxdepth 1 -name "*.bundle" -type d -exec cp -R {} "$RESOURCES/" \;
+
 # Info.plist
 cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

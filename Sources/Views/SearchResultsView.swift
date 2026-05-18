@@ -18,7 +18,7 @@ struct SearchResultsView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                     .font(.callout)
-                TextField("搜索文档内容...", text: $searchText)
+                TextField(L("搜索文档内容..."), text: $searchText)
                     .textFieldStyle(.roundedBorder)
                     .font(.body)
                     .focused($searchFieldFocused)
@@ -41,13 +41,13 @@ struct SearchResultsView: View {
                 Button {
                     runSearchIfReady()
                 } label: {
-                    Label("搜索", systemImage: "arrow.right.circle.fill")
+                    Label(L("搜索"), systemImage: "arrow.right.circle.fill")
                         .labelStyle(.iconOnly)
                         .font(.title3)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.secondary.opacity(0.45) : Color.blue)
-                .help("搜索")
+                .help(L("搜索"))
                 .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching)
             }
             .padding(.horizontal, 14)
@@ -57,7 +57,7 @@ struct SearchResultsView: View {
             // File type filter
             HStack(spacing: 6) {
                 ForEach(FileTypeFilter.allCases) { filter in
-                    Button(filter.rawValue) {
+                    Button(filter.displayName) {
                         fileTypeFilter = filter
                         if !results.isEmpty { onSearch() }
                     }
@@ -75,7 +75,7 @@ struct SearchResultsView: View {
             // Results count
             if !results.isEmpty {
                 HStack {
-                    Text("\(results.count) 个结果")
+                    Text(LF("%d 个结果", results.count))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -91,7 +91,7 @@ struct SearchResultsView: View {
                 VStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.regular)
-                    Text("正在搜索...")
+                    Text(L("正在搜索..."))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -113,11 +113,11 @@ struct SearchResultsView: View {
                     Image(systemName: searchText.isEmpty ? "text.magnifyingglass" : "doc.questionmark")
                         .font(.system(size: 40, weight: .thin))
                         .foregroundStyle(.quaternary)
-                    Text(searchText.isEmpty ? "输入关键词搜索全部文档" : "无匹配结果")
+                    Text(searchText.isEmpty ? L("输入关键词搜索全部文档") : L("无匹配结果"))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     if searchText.isEmpty {
-                        Text("支持 PDF、Word、Excel、TXT、Markdown 等格式")
+                        Text(L("支持 PDF、Word、Excel、TXT、Markdown 等格式"))
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }

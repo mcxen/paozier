@@ -73,7 +73,7 @@ struct GlobalSearchPopupView: View {
             // Search field
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").font(.title2).foregroundStyle(.blue)
-                TextField("全局搜索文档...", text: $query)
+                TextField(L("全局搜索文档..."), text: $query)
                     .textFieldStyle(.plain)
                     .font(.title3)
                     .focused($focused)
@@ -88,10 +88,10 @@ struct GlobalSearchPopupView: View {
             Divider()
 
             if results.isEmpty && !query.isEmpty && !isSearching {
-                Text("无匹配结果").font(.callout).foregroundStyle(.secondary)
+                Text(L("无匹配结果")).font(.callout).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if results.isEmpty {
-                Text("输入关键词搜索已索引文档").font(.callout).foregroundStyle(.tertiary)
+                Text(L("输入关键词搜索已索引文档")).font(.callout).foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
@@ -127,11 +127,11 @@ struct GlobalSearchPopupView: View {
 
             // Footer
             HStack(spacing: 12) {
-                Text("↑↓ 选择").font(.caption2).foregroundStyle(.tertiary)
-                Text("⏎ 打开").font(.caption2).foregroundStyle(.tertiary)
-                Text("⎋ 关闭").font(.caption2).foregroundStyle(.tertiary)
+                Text(L("↑↓ 选择")).font(.caption2).foregroundStyle(.tertiary)
+                Text(L("⏎ 打开")).font(.caption2).foregroundStyle(.tertiary)
+                Text(L("⎋ 关闭")).font(.caption2).foregroundStyle(.tertiary)
                 Spacer()
-                Text("\(results.count) 个结果").font(.caption2).foregroundStyle(.tertiary)
+                Text(LF("%d 个结果", results.count)).font(.caption2).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
             .background(.ultraThinMaterial)

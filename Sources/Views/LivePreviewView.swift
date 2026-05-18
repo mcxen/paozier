@@ -111,7 +111,7 @@ struct LivePreviewView: View {
                     copied = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
                 } label: {
-                    Label(copied ? "已复制" : "复制全文", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    Label(copied ? L("已复制") : L("复制全文"), systemImage: copied ? "checkmark" : "doc.on.doc")
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
@@ -265,59 +265,114 @@ private struct MarkdownWebPreview: NSViewRepresentable {
     }
 
     private func renderHTML() -> String {
-        let body = markdownToHTML(markdown)
+        let markdownJSON = jsonString(markdown)
         let primaryTermsJSON = json(primaryTerms)
         let secondaryTermsJSON = json(secondaryTerms)
+        let markedScript = Self.markedScript
         return """
         <!doctype html>
         <html>
         <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
         :root { color-scheme: light dark; }
+        * { box-sizing: border-box; }
         body {
           margin: 0;
-          padding: 24px 28px 48px;
-          font: 15px/1.62 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+          padding: 24px 32px 52px;
+          font: 15px/1.58 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
           color: CanvasText;
           background: Canvas;
         }
-        h1, h2, h3 { line-height: 1.25; margin: 1.2em 0 .55em; font-weight: 750; }
-        h1 { font-size: 28px; border-bottom: 1px solid color-mix(in srgb, CanvasText 18%, transparent); padding-bottom: 8px; }
-        h2 { font-size: 22px; }
-        h3 { font-size: 18px; }
-        p { margin: .85em 0; }
-        ul, ol { padding-left: 1.6em; }
-        li { margin: .32em 0; }
+        .markdown-body {
+          max-width: 980px;
+          margin: 0 auto;
+          word-wrap: break-word;
+        }
+        h1, h2, h3, h4, h5, h6 {
+          margin: 24px 0 16px;
+          line-height: 1.25;
+          font-weight: 650;
+        }
+        h1, h2 {
+          padding-bottom: .3em;
+          border-bottom: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+        }
+        h1 { font-size: 2em; }
+        h2 { font-size: 1.5em; }
+        h3 { font-size: 1.25em; }
+        h4 { font-size: 1em; }
+        h5 { font-size: .875em; }
+        h6 { font-size: .85em; color: color-mix(in srgb, CanvasText 64%, transparent); }
+        p, blockquote, ul, ol, dl, table, pre, details { margin: 0 0 16px; }
+        ul, ol { padding-left: 2em; }
+        li { margin: .25em 0; }
+        li > p { margin-top: 16px; }
+        li + li { margin-top: .25em; }
+        .contains-task-list { padding-left: 1.5em; }
+        .task-list-item { list-style-type: none; }
+        .task-list-item input {
+          margin: 0 .45em .25em -1.4em;
+          vertical-align: middle;
+        }
+        a { color: #0969da; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        strong { font-weight: 650; }
         code {
           font-family: "SF Mono", Menlo, monospace;
-          font-size: .92em;
-          padding: 2px 4px;
-          border-radius: 4px;
+          font-size: 85%;
+          padding: .2em .4em;
+          border-radius: 6px;
           background: color-mix(in srgb, CanvasText 10%, transparent);
         }
         pre {
           overflow: auto;
-          padding: 12px;
-          border-radius: 7px;
-          background: color-mix(in srgb, CanvasText 9%, transparent);
-        }
-        pre code { padding: 0; background: transparent; }
-        blockquote {
-          margin: 1em 0;
-          padding-left: 14px;
-          border-left: 3px solid #6aa7ff;
-          color: color-mix(in srgb, CanvasText 72%, transparent);
-        }
-        img {
-          display: block;
-          max-width: min(100%, 980px);
-          height: auto;
-          margin: 14px 0;
+          padding: 16px;
           border-radius: 6px;
+          line-height: 1.45;
+          background: color-mix(in srgb, CanvasText 8%, transparent);
         }
-        table { border-collapse: collapse; max-width: 100%; overflow: auto; }
-        th, td { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); padding: 6px 8px; }
+        pre code {
+          display: block;
+          padding: 0;
+          overflow: visible;
+          font-size: 100%;
+          white-space: pre;
+          background: transparent;
+        }
+        blockquote {
+          padding: 0 1em;
+          border-left: .25em solid color-mix(in srgb, CanvasText 22%, transparent);
+          color: color-mix(in srgb, CanvasText 66%, transparent);
+        }
+        blockquote > :first-child { margin-top: 0; }
+        blockquote > :last-child { margin-bottom: 0; }
+        img {
+          max-width: 100%;
+          height: auto;
+        }
+        table {
+          display: block;
+          width: max-content;
+          max-width: 100%;
+          overflow: auto;
+          border-spacing: 0;
+          border-collapse: collapse;
+        }
+        th, td {
+          padding: 6px 13px;
+          border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+        }
+        tr { background: Canvas; border-top: 1px solid color-mix(in srgb, CanvasText 16%, transparent); }
+        tr:nth-child(2n) { background: color-mix(in srgb, CanvasText 4%, transparent); }
+        hr {
+          height: .25em;
+          padding: 0;
+          margin: 24px 0;
+          background: color-mix(in srgb, CanvasText 14%, transparent);
+          border: 0;
+        }
         mark.primary {
           background: #ffe66d;
           color: #111;
@@ -333,10 +388,47 @@ private struct MarkdownWebPreview: NSViewRepresentable {
         </style>
         </head>
         <body>
-        \(body)
+        <article id="content" class="markdown-body"></article>
         <script>
+        \(markedScript)
+        </script>
+        <script>
+        const markdownSource = \(markdownJSON);
         const primaryTerms = \(primaryTermsJSON);
         const secondaryTerms = \(secondaryTermsJSON);
+        const markedAPI = window.marked && (window.marked.parse ? window.marked : (window.marked.marked ? window.marked.marked : null));
+        markedAPI.setOptions({
+          gfm: true,
+          breaks: false,
+          pedantic: false,
+          headerIds: false,
+          mangle: false
+        });
+        const content = document.getElementById('content');
+        content.innerHTML = markedAPI.parse(markdownSource);
+        sanitize(content);
+        document.querySelectorAll('a[href]').forEach(a => {
+          a.target = '_blank';
+          a.rel = 'noreferrer';
+        });
+        document.querySelectorAll('ul').forEach(ul => {
+          if (ul.querySelector(':scope > li > input[type="checkbox"]')) ul.classList.add('contains-task-list');
+        });
+        document.querySelectorAll('li').forEach(li => {
+          if (li.querySelector(':scope > input[type="checkbox"]')) li.classList.add('task-list-item');
+        });
+        function sanitize(root) {
+          root.querySelectorAll('script, iframe, object, embed').forEach(el => el.remove());
+          root.querySelectorAll('*').forEach(el => {
+            for (const attr of [...el.attributes]) {
+              const name = attr.name.toLowerCase();
+              const value = attr.value.trim().toLowerCase();
+              if (name.startsWith('on') || value.startsWith('javascript:')) {
+                el.removeAttribute(attr.name);
+              }
+            }
+          });
+        }
         function walk(node, terms, className) {
           if (!terms.length || ['SCRIPT','STYLE','CODE','PRE'].includes(node.parentNode?.nodeName)) return;
           if (node.nodeType === Node.TEXT_NODE) {
@@ -392,111 +484,44 @@ private struct MarkdownWebPreview: NSViewRepresentable {
         """
     }
 
+    private static let markedScript: String = {
+        let candidates = [
+            Bundle.module.url(forResource: "marked.umd", withExtension: "js"),
+            Bundle.main.url(forResource: "marked.umd", withExtension: "js"),
+            Bundle.main.resourceURL?.appendingPathComponent("Paozier_Paozier.bundle/marked.umd.js"),
+            Bundle.main.resourceURL?.appendingPathComponent("marked.umd.js")
+        ]
+        for url in candidates.compactMap({ $0 }) {
+            if let script = try? String(contentsOf: url, encoding: .utf8) {
+                return script
+            }
+        }
+        return """
+        window.marked = { setOptions: function(){}, parse: function(value) {
+          const escaped = String(value).replace(/[&<>]/g, function(ch) {
+            return ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]);
+          });
+          return escaped
+            .replace(/^###\\s+(.+)$/gm, '<h3>$1</h3>')
+            .replace(/^##\\s+(.+)$/gm, '<h2>$1</h2>')
+            .replace(/^#\\s+(.+)$/gm, '<h1>$1</h1>')
+            .replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>')
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .split(/\\n{2,}/).map(function(block) {
+              return /^<h[1-6]|^<pre|^<ul|^<ol|^<blockquote|^<table/.test(block) ? block : '<p>' + block.replace(/\\n/g, '<br>') + '</p>';
+            }).join('\\n');
+        }};
+        """
+    }()
+
     private func json(_ terms: [String]) -> String {
         let data = (try? JSONSerialization.data(withJSONObject: terms)) ?? Data("[]".utf8)
         return String(data: data, encoding: .utf8) ?? "[]"
     }
 
-    private func markdownToHTML(_ markdown: String) -> String {
-        var html: [String] = []
-        var inCode = false
-        var listOpen = false
-
-        func closeList() {
-            if listOpen {
-                html.append("</ul>")
-                listOpen = false
-            }
-        }
-
-        for rawLine in markdown.components(separatedBy: .newlines) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-
-            if line.hasPrefix("```") {
-                if inCode {
-                    html.append("</code></pre>")
-                    inCode = false
-                } else {
-                    closeList()
-                    html.append("<pre><code>")
-                    inCode = true
-                }
-                continue
-            }
-
-            if inCode {
-                html.append(escapeHTML(rawLine) + "\n")
-                continue
-            }
-
-            if line.isEmpty {
-                closeList()
-                continue
-            }
-
-            if let image = parseImage(line) {
-                closeList()
-                html.append(image)
-            } else if line.hasPrefix("### ") {
-                closeList()
-                html.append("<h3>\(inlineMarkdown(String(line.dropFirst(4))))</h3>")
-            } else if line.hasPrefix("## ") {
-                closeList()
-                html.append("<h2>\(inlineMarkdown(String(line.dropFirst(3))))</h2>")
-            } else if line.hasPrefix("# ") {
-                closeList()
-                html.append("<h1>\(inlineMarkdown(String(line.dropFirst(2))))</h1>")
-            } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
-                if !listOpen {
-                    html.append("<ul>")
-                    listOpen = true
-                }
-                html.append("<li>\(inlineMarkdown(String(line.dropFirst(2))))</li>")
-            } else if line.hasPrefix("> ") {
-                closeList()
-                html.append("<blockquote>\(inlineMarkdown(String(line.dropFirst(2))))</blockquote>")
-            } else {
-                closeList()
-                html.append("<p>\(inlineMarkdown(line))</p>")
-            }
-        }
-        closeList()
-        if inCode { html.append("</code></pre>") }
-        return html.joined(separator: "\n")
-    }
-
-    private func parseImage(_ line: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: #"!\[([^\]]*)\]\(([^)]+)\)"#),
-              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..<line.endIndex, in: line)),
-              let altRange = Range(match.range(at: 1), in: line),
-              let srcRange = Range(match.range(at: 2), in: line) else { return nil }
-        let alt = escapeHTML(String(line[altRange]))
-        let src = escapeAttribute(String(line[srcRange]).trimmingCharacters(in: CharacterSet(charactersIn: "\"'")))
-        return #"<img alt="\#(alt)" src="\#(src)">"#
-    }
-
-    private func inlineMarkdown(_ text: String) -> String {
-        var html = escapeHTML(text)
-        html = replace(html, pattern: #"`([^`]+)`"#, template: #"<code>$1</code>"#)
-        html = replace(html, pattern: #"\*\*([^*]+)\*\*"#, template: #"<strong>$1</strong>"#)
-        html = replace(html, pattern: #"\*([^*]+)\*"#, template: #"<em>$1</em>"#)
-        return html
-    }
-
-    private func replace(_ text: String, pattern: String, template: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        return regex.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..<text.endIndex, in: text), withTemplate: template)
-    }
-
-    private func escapeHTML(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-    }
-
-    private func escapeAttribute(_ text: String) -> String {
-        escapeHTML(text)
-            .replacingOccurrences(of: "\"", with: "&quot;")
+    private func jsonString(_ value: String) -> String {
+        let data = (try? JSONSerialization.data(withJSONObject: [value])) ?? Data("[\"\"]".utf8)
+        let array = String(data: data, encoding: .utf8) ?? "[\"\"]"
+        return String(array.dropFirst().dropLast())
     }
 }

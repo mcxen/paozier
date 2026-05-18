@@ -113,6 +113,16 @@ actor SearchEngine {
         open()
     }
 
+    func removeFiles(inFolderPath folderPath: String) {
+        let folder = normalizedPath(folderPath)
+        let urls = allIndexedURLs().filter { url in
+            let path = normalizedPath(url.path)
+            return path == folder || path.hasPrefix(folder + "/")
+        }
+        removeFiles(at: urls)
+        commit()
+    }
+
     var documentCount: Int {
         Int(ftsIndex.count())
     }
@@ -202,7 +212,7 @@ actor SearchEngine {
             let content = Self.normalizeForSearch((try? extractText(from: item.url)) ?? "")
             let snippet: String
             if item.score <= 0.3 && _searchFilenames {
-                snippet = "文件名匹配: \(fileName)"
+                snippet = LF("文件名匹配: %@", fileName)
             } else {
                 snippet = extractSnippet(path: path, options: options)
             }

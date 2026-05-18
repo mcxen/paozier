@@ -19,6 +19,9 @@ struct ContentView: View {
     @State private var primaryMatchStep = 0
     @State private var previewFindText = ""
     @State private var previewFindStep = 0
+    @State private var searchTask: Task<Void, Never>?
+    @State private var documentMatchesCollapsed = false
+    @State private var documentMatchesHeight: CGFloat = 190
     @FocusState private var searchFieldFocused: Bool
     @FocusState private var previewFindFocused: Bool
 
@@ -93,7 +96,7 @@ struct ContentView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                     .font(.system(size: 13))
-                TextField("搜索文档内容...", text: $searchText)
+                TextField(L("搜索文档内容..."), text: $searchText)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 13))
                     .focused($searchFieldFocused)
@@ -107,12 +110,19 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(showSearchOptions || hasActiveSearchOptions ? Color.accentColor : .secondary)
                 .focusable(false)
-                .help("搜索条件")
+                .help(L("搜索条件"))
                 if isSearching {
                     ProgressView().controlSize(.small)
                 }
                 if !searchText.isEmpty {
-                    Button { searchText = ""; results = []; searchFieldFocused = true } label: {
+                    Button {
+                        searchTask?.cancel()
+                        isSearching = false
+                        searchText = ""
+                        results = []
+                        selectedResult = nil
+                        searchFieldFocused = true
+                    } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                     }.buttonStyle(.plain).focusable(false)
                 }
@@ -129,7 +139,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .focusable(false)
-                .help("快速搜索面板")
+                .help(L("快速搜索面板"))
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -146,16 +156,16 @@ struct ContentView: View {
             // Results header
             if !results.isEmpty {
                 HStack(spacing: 8) {
-                    Text("\(results.count) 个结果")
+                    Text(isSearching ? LF("已找到 %d 个结果...", results.count) : LF("%d 个结果", results.count))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button { showHistory.toggle() } label: {
                         Image(systemName: "clock").font(.system(size: 11))
-                    }.buttonStyle(.plain).foregroundStyle(.secondary).help("搜索历史")
+                    }.buttonStyle(.plain).foregroundStyle(.secondary).help(L("搜索历史"))
                     Button { showCompendium.toggle() } label: {
                         Image(systemName: "doc.text.image").font(.system(size: 11))
-                    }.buttonStyle(.plain).foregroundStyle(.secondary).help("报告")
+                    }.buttonStyle(.plain).foregroundStyle(.secondary).help(L("报告"))
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
@@ -170,10 +180,10 @@ struct ContentView: View {
                     Image(systemName: "text.magnifyingglass")
                         .font(.system(size: 32, weight: .ultraLight))
                         .foregroundStyle(.quaternary)
-                    Text(searchText.isEmpty ? "输入关键词搜索全部文档" : "无匹配结果")
+                    Text(searchText.isEmpty ? L("输入关键词搜索全部文档") : L("无匹配结果"))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                    Text("SearchKit + SQLite FTS5 双引擎 · 支持中英文")
+                    Text("SearchKit + SQLite FTS5 + grep")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }
@@ -183,8 +193,8 @@ struct ContentView: View {
                     ResultRow(result: result, isSelected: selectedResult == result)
                         .tag(result)
                         .contextMenu {
-                            Button("打开文件") { NSWorkspace.shared.open(URL(fileURLWithPath: result.filePath)) }
-                            Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: result.filePath)]) }
+                            Button(L("打开文件")) { NSWorkspace.shared.open(URL(fileURLWithPath: result.filePath)) }
+                            Button(L("在 Finder 中显示")) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: result.filePath)]) }
                         }
                 }
                 .listStyle(.plain)
@@ -204,7 +214,7 @@ struct ContentView: View {
                     HStack(spacing: 8) {
                         Picker("", selection: $previewMode) {
                             Label("Live Preview", systemImage: "text.magnifyingglass").tag(PreviewMode.live)
-                            Label("原文件", systemImage: "doc.richtext").tag(PreviewMode.pdf)
+                            Label(L("原文件"), systemImage: "doc.richtext").tag(PreviewMode.pdf)
                         }
                         .pickerStyle(.segmented)
                         .frame(width: 200)
@@ -214,7 +224,7 @@ struct ContentView: View {
                         Spacer()
 
                         HStack(spacing: 4) {
-                            TextField("预览内查找", text: $previewFindText)
+                            TextField(L("预览内查找"), text: $previewFindText)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 11))
                                 .frame(width: 150)
@@ -233,12 +243,12 @@ struct ContentView: View {
                         }
 
                         Menu {
-                            Button("添加到报告") { dataManager.addToCompendium(result: result, query: searchText) }
-                            Button("导出高亮文档") { dataManager.exportHighlighted(result: result, terms: searchTerms) }
-                            Button("收藏搜索") { dataManager.addBookmark(name: searchText, query: searchText) }
+                            Button(L("添加到报告")) { dataManager.addToCompendium(result: result, query: searchText) }
+                            Button(L("导出高亮文档")) { dataManager.exportHighlighted(result: result, terms: searchTerms) }
+                            Button(L("收藏搜索")) { dataManager.addBookmark(name: searchText, query: searchText) }
                             Divider()
-                            Button("打开文件") { NSWorkspace.shared.open(URL(fileURLWithPath: result.filePath)) }
-                            Button("在 Finder 中显示") { NSWorkspace.shared.selectFile(result.filePath, inFileViewerRootedAtPath: "") }
+                            Button(L("打开文件")) { NSWorkspace.shared.open(URL(fileURLWithPath: result.filePath)) }
+                            Button(L("在 Finder 中显示")) { NSWorkspace.shared.selectFile(result.filePath, inFileViewerRootedAtPath: "") }
                         } label: {
                             Image(systemName: "ellipsis.circle")
                                 .font(.system(size: 14))
@@ -275,6 +285,11 @@ struct ContentView: View {
                     }
                     .transition(.opacity)
                     .animation(.easeInOut(duration: 0.2), value: previewMode)
+
+                    if !documentMatchSnippets(for: result).isEmpty {
+                        Divider()
+                        documentMatchesPanel(for: result)
+                    }
                 }
             } else if let folder = indexManager.selectedFolder {
                 FolderContentView(folder: folder)
@@ -283,10 +298,10 @@ struct ContentView: View {
                     Image(systemName: "doc.text.below.ecg")
                         .font(.system(size: 36, weight: .ultraLight))
                         .foregroundStyle(.quaternary)
-                    Text("选择结果查看 Live Preview")
+                    Text(L("选择结果查看 Live Preview"))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                    Text("高亮搜索词 · 直接复制文本 · 无需打开原文件")
+                    Text(L("高亮搜索词 · 直接复制文本 · 无需打开原文件"))
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }
@@ -300,6 +315,116 @@ struct ContentView: View {
             .split(whereSeparator: \.isWhitespace)
             .map(String.init)
             .filter { !$0.isEmpty }
+    }
+
+    private struct DocumentMatchSnippet: Identifiable, Hashable {
+        let id: Int
+        let snippet: String
+    }
+
+    private func documentMatchSnippets(for result: SearchResult) -> [DocumentMatchSnippet] {
+        let content = result.content.isEmpty ? result.snippet : result.content
+        let context = max(0, AppSettings.shared.matchContextChars)
+        guard !content.isEmpty else { return [] }
+
+        if currentSearchOptions.usesRegex {
+            guard let regex = try? NSRegularExpression(pattern: currentSearchOptions.trimmedQuery, options: [.caseInsensitive]) else { return [] }
+            let range = NSRange(content.startIndex..<content.endIndex, in: content)
+            return regex.matches(in: content, range: range).enumerated().compactMap { idx, match in
+                guard let swiftRange = Range(match.range, in: content) else { return nil }
+                return DocumentMatchSnippet(id: idx, snippet: snippetAround(swiftRange, in: content, context: context))
+            }
+        }
+
+        let terms = currentSearchOptions.highlightTerms
+        guard !terms.isEmpty else { return [] }
+        let lower = content.lowercased()
+        var ranges: [Range<String.Index>] = []
+        for term in terms {
+            let needle = term.lowercased()
+            guard !needle.isEmpty else { continue }
+            var start = lower.startIndex
+            while let range = lower.range(of: needle, range: start..<lower.endIndex) {
+                ranges.append(range)
+                start = range.upperBound
+            }
+        }
+
+        return ranges
+            .sorted { $0.lowerBound < $1.lowerBound }
+            .enumerated()
+            .map { idx, range in
+                DocumentMatchSnippet(id: idx, snippet: snippetAround(range, in: content, context: context))
+            }
+    }
+
+    private func snippetAround(_ range: Range<String.Index>, in content: String, context: Int) -> String {
+        let start = content.index(range.lowerBound, offsetBy: -context, limitedBy: content.startIndex) ?? content.startIndex
+        let end = content.index(range.upperBound, offsetBy: context, limitedBy: content.endIndex) ?? content.endIndex
+        let prefix = start == content.startIndex ? "" : "…"
+        let suffix = end == content.endIndex ? "" : "…"
+        return prefix + String(content[start..<end]).replacingOccurrences(of: "\n", with: " ") + suffix
+    }
+
+    private func documentMatchesPanel(for result: SearchResult) -> some View {
+        let matches = documentMatchSnippets(for: result)
+        return VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.42))
+                    .frame(width: 34, height: 4)
+                Label(LF("当前文档 %d 个命中", matches.count), systemImage: "list.bullet.rectangle")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        documentMatchesCollapsed.toggle()
+                    }
+                } label: {
+                    Image(systemName: documentMatchesCollapsed ? "chevron.up.square" : "chevron.down.square")
+                        .font(.system(size: 13))
+                }
+                .buttonStyle(.plain)
+                .help(documentMatchesCollapsed ? L("展开命中列表") : L("收起命中列表"))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 3)
+                    .onChanged { value in
+                        guard !documentMatchesCollapsed else { return }
+                        documentMatchesHeight = min(360, max(92, documentMatchesHeight - value.translation.height))
+                    }
+            )
+
+            if !documentMatchesCollapsed {
+                Divider()
+                List(matches) { match in
+                    Button {
+                        primaryMatchStep = match.id
+                    } label: {
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("\(match.id + 1)")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                                .frame(width: 22, alignment: .trailing)
+                            Text(match.snippet)
+                                .font(.system(size: 12))
+                                .lineLimit(3)
+                                .foregroundStyle(.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.plain)
+                .frame(height: documentMatchesHeight)
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var matchNavigationControls: some View {
@@ -318,7 +443,7 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .disabled(searchTerms.isEmpty)
         }
-        .help("跳转搜索词高亮")
+        .help(L("跳转搜索词高亮"))
     }
 
     private var hasActiveSearchOptions: Bool {
@@ -326,22 +451,22 @@ struct ContentView: View {
     }
 
     private var fileTypeSummary: String {
-        if selectedFileTypes.isEmpty { return "全部类型" }
+        if selectedFileTypes.isEmpty { return L("全部类型") }
         return FileTypeFilter.allCases
             .filter { selectedFileTypes.contains($0) && $0 != .all }
-            .map(\.rawValue)
+            .map(\.displayName)
             .joined(separator: "、")
     }
 
     private var searchScopeSummary: String {
-        guard let selectedSearchFolderPath else { return "全部文件夹" }
+        guard let selectedSearchFolderPath else { return L("全部文件夹") }
         return URL(fileURLWithPath: selectedSearchFolderPath).lastPathComponent
     }
 
     private var searchOptionsPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Label("搜索条件", systemImage: "line.3.horizontal.decrease.circle")
+                Label(L("搜索条件"), systemImage: "line.3.horizontal.decrease.circle")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Text("\(searchScopeSummary) · \(fileTypeSummary)")
@@ -349,16 +474,16 @@ struct ContentView: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                 Spacer()
-                Toggle("正则", isOn: searchOptionBinding(\.usesRegex))
+                Toggle(L("正则"), isOn: searchOptionBinding(\.usesRegex))
                     .toggleStyle(.checkbox)
                     .font(.system(size: 11))
-                Toggle("空格模糊", isOn: searchOptionBinding(\.fuzzySpaces))
+                Toggle(L("空格模糊"), isOn: searchOptionBinding(\.fuzzySpaces))
                     .toggleStyle(.checkbox)
                     .font(.system(size: 11))
             }
 
             HStack(spacing: 8) {
-                Text("范围")
+                Text(L("范围"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 32, alignment: .leading)
@@ -369,7 +494,7 @@ struct ContentView: View {
                         rerunSearchIfNeeded()
                     }
                 )) {
-                    Text("全部已添加文件夹").tag("")
+                    Text(L("全部已添加文件夹")).tag("")
                     ForEach(indexManager.indexedFolders) { folder in
                         Text(URL(fileURLWithPath: folder.path).lastPathComponent).tag(folder.path)
                     }
@@ -382,7 +507,7 @@ struct ContentView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 5) {
                     ForEach(FileTypeFilter.allCases) { filter in
-                        Button(filter.rawValue) {
+                        Button(filter.displayName) {
                             toggleFileType(filter)
                         }
                         .font(.system(size: 11, weight: isFileTypeSelected(filter) ? .semibold : .regular))
@@ -449,19 +574,56 @@ struct ContentView: View {
 
     private func performSearch() {
         let q = searchText.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return }
+        guard !q.isEmpty else {
+            searchTask?.cancel()
+            isSearching = false
+            return
+        }
+        searchTask?.cancel()
         isSearching = true
+        results = []
+        selectedResult = nil
         let options = currentSearchOptions
-        Task {
-            let items = await indexManager.search(options: options)
-            await MainActor.run {
-                withAnimation(.smooth(duration: 0.25)) {
-                    results = items
-                    selectedResult = items.first
+        searchTask = Task {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    let items = await indexManager.search(options: options)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        appendSearchResults(items)
+                    }
                 }
+
+                group.addTask {
+                    let stream = await indexManager.grepSearch(options: options)
+                    for await batch in stream {
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            appendSearchResults(batch.results)
+                        }
+                    }
+                }
+            }
+
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
                 isSearching = false
-                dataManager.addHistory(query: q, resultCount: items.count)
+                dataManager.addHistory(query: q, resultCount: results.count)
                 searchFieldFocused = true
+            }
+        }
+    }
+
+    private func appendSearchResults(_ newItems: [SearchResult]) {
+        guard !newItems.isEmpty else { return }
+        let existingPaths = Set(results.map(\.filePath))
+        let uniqueItems = newItems.filter { !existingPaths.contains($0.filePath) }
+        guard !uniqueItems.isEmpty else { return }
+
+        withAnimation(.smooth(duration: 0.18)) {
+            results.append(contentsOf: uniqueItems)
+            if selectedResult == nil {
+                selectedResult = results.first
             }
         }
     }

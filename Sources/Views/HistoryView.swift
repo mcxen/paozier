@@ -11,17 +11,17 @@ struct HistoryView: View {
         VStack(spacing: 0) {
             HStack {
                 Picker("", selection: $tab) {
-                    Text("历史").tag(0)
-                    Text("书签").tag(1)
+                    Text(L("历史")).tag(0)
+                    Text(L("书签")).tag(1)
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 160)
                 Spacer()
                 if tab == 0 {
-                    Button("清空历史") { dataManager.clearHistory() }
+                    Button(L("清空历史")) { dataManager.clearHistory() }
                         .controlSize(.small)
                 }
-                Button("关闭") { dismiss() }
+                Button(L("关闭")) { dismiss() }
                     .controlSize(.small)
             }
             .padding(12)
@@ -42,7 +42,7 @@ struct HistoryView: View {
                                 Text(item.query)
                                     .font(.callout)
                                 HStack {
-                                    Text("\(item.resultCount) 结果")
+                                    Text(LF("%d 结果", item.resultCount))
                                     Text(item.date, style: .relative)
                                 }
                                 .font(.caption2)
