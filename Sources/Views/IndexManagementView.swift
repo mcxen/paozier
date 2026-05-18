@@ -5,9 +5,18 @@ struct IndexManagementView: View {
     @EnvironmentObject var indexManager: IndexManager
     @State private var selectedFolderID: String?
     @State private var pendingFolderAction: FolderAction?
+    @State private var infoFolderID: String?
+    @State private var visibleFolderCount = 20
 
-    private var selectedFolder: IndexedFolder? {
-        indexManager.indexedFolders.first { $0.id == selectedFolderID } ?? indexManager.indexedFolders.first
+    private let pageSize = 20
+
+    private var infoFolder: IndexedFolder? {
+        guard let infoFolderID else { return nil }
+        return indexManager.indexedFolders.first(where: { $0.id == infoFolderID })
+    }
+
+    private var visibleFolders: [IndexedFolder] {
+        Array(indexManager.indexedFolders.prefix(visibleFolderCount))
     }
 
     private enum FolderAction: Identifiable {
@@ -49,9 +58,34 @@ struct IndexManagementView: View {
                 .padding(16)
             }
         }
-        .frame(minWidth: 320)
+        .frame(minWidth: 420)
         .onAppear {
             selectedFolderID = selectedFolderID ?? indexManager.indexedFolders.first?.id
+            visibleFolderCount = max(pageSize, min(visibleFolderCount, indexManager.indexedFolders.count))
+        }
+        .onChange(of: indexManager.indexedFolders.map(\.id)) { _, ids in
+            if let selectedFolderID, !ids.contains(selectedFolderID) {
+                self.selectedFolderID = ids.first
+            }
+            if let infoFolderID, !ids.contains(infoFolderID) {
+                self.infoFolderID = nil
+            }
+            visibleFolderCount = min(max(pageSize, visibleFolderCount), max(pageSize, ids.count))
+        }
+        .sheet(isPresented: Binding(
+            get: { infoFolder != nil },
+            set: { if !$0 { infoFolderID = nil } }
+        )) {
+            if let infoFolder {
+                FolderIndexInfoView(
+                    folder: infoFolder,
+                    status: indexManager.status(for: infoFolder),
+                    isActive: indexManager.isActiveFolder(infoFolder),
+                    onReindex: { Task { await indexManager.indexFolder(infoFolder) } },
+                    onClear: { pendingFolderAction = .clear(infoFolder) },
+                    onReveal: { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: infoFolder.path) }
+                )
+            }
         }
         .alert(pendingFolderAction?.title ?? "", isPresented: Binding(
             get: { pendingFolderAction != nil },
@@ -65,17 +99,31 @@ struct IndexManagementView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 10) {
             Label(L("索引管理"), systemImage: "chart.bar.doc.horizontal")
                 .font(.headline)
             Spacer()
+            Button {
+                indexManager.addFolder()
+            } label: {
+                Label(L("添加文件夹"), systemImage: "plus")
+            }
+            .controlSize(.small)
+
+            Button {
+                indexManager.refreshFolderCounts()
+            } label: {
+                Label(L("刷新"), systemImage: "arrow.clockwise")
+            }
+            .controlSize(.small)
+
             Button {
                 Task { await indexManager.reindexAll() }
             } label: {
                 Label(L("重建全部"), systemImage: "arrow.triangle.2.circlepath")
             }
-            .disabled(indexManager.isIndexing)
             .controlSize(.small)
+            .disabled(indexManager.isIndexing)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -99,9 +147,14 @@ struct IndexManagementView: View {
             ProgressView(value: indexManager.isIndexing ? indexManager.indexProgress : 1)
                 .tint(indexManager.isIndexing ? .blue : .green)
 
-            HStack {
-                Text(indexManager.isIndexing ? indexManager.indexingFolderName : indexManager.statusMessage)
-                    .lineLimit(1)
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(indexManager.isIndexing ? indexManager.indexingFolderName : indexManager.statusMessage)
+                        .lineLimit(1)
+                    Text(LF("队列中 %d 个文件夹", indexManager.queuedFolderIDs.count))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
                 Spacer()
                 if indexManager.isIndexing {
                     Text("\(indexManager.indexingFileCount)/\(indexManager.indexingTotalFiles)")
@@ -159,68 +212,30 @@ struct IndexManagementView: View {
                 Text(L("索引结果"))
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                Button { indexManager.refreshFolderCounts() } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.plain)
-                .help(L("刷新文件数量"))
+                Text(LF("%d 个文件夹", indexManager.indexedFolders.count))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            Picker("", selection: Binding(
-                get: { selectedFolderID ?? indexManager.indexedFolders.first?.id ?? "" },
-                set: { selectedFolderID = $0 }
-            )) {
-                ForEach(indexManager.indexedFolders) { folder in
-                    Text(URL(fileURLWithPath: folder.path).lastPathComponent).tag(folder.id)
-                }
-            }
-            .pickerStyle(.menu)
-            .controlSize(.small)
-
-            if let selectedFolder {
-                VStack(spacing: 0) {
-                    folderMetric(L("路径"), selectedFolder.path)
-                    folderMetric(L("文件数"), "\(selectedFolder.fileCount)")
-                    folderMetric(L("上次索引"), selectedFolder.lastIndexed?.formatted(date: .abbreviated, time: .shortened) ?? L("尚未完成"))
-                }
-                .font(.caption)
-                .background(Color.primary.opacity(0.035))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-
-                HStack {
-                    Button {
-                        indexManager.selectedFolder = selectedFolder
-                    } label: {
-                        Label(L("查看文件"), systemImage: "folder")
-                    }
-                    Button {
-                        Task { await indexManager.indexFolder(selectedFolder) }
-                    } label: {
-                        Label(L("重新索引"), systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    .disabled(indexManager.isIndexing)
-                    Button(role: .destructive) {
-                        pendingFolderAction = .clear(selectedFolder)
-                    } label: {
-                        Label(L("清理索引"), systemImage: "trash")
-                    }
-                    .disabled(indexManager.isIndexing)
-                    Button(role: .destructive) {
-                        pendingFolderAction = .remove(selectedFolder)
-                    } label: {
-                        Label(L("移除文件夹"), systemImage: "minus.circle")
-                    }
-                    .disabled(indexManager.isIndexing)
-                    Button {
-                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: selectedFolder.path)
-                    } label: {
-                        Label("Finder", systemImage: "folder")
-                    }
-                }
-                .controlSize(.small)
-            } else {
+            if visibleFolders.isEmpty {
                 ContentUnavailableView(L("暂无索引文件夹"), systemImage: "folder.badge.plus")
-                    .frame(minHeight: 140)
+                    .frame(minHeight: 180)
+            } else {
+                LazyVStack(spacing: 10) {
+                    ForEach(visibleFolders) { folder in
+                        folderRow(folder)
+                            .onAppear { loadMoreFoldersIfNeeded(current: folder) }
+                    }
+
+                    if visibleFolderCount < indexManager.indexedFolders.count {
+                        Button(L("加载更多文件夹")) {
+                            visibleFolderCount = min(visibleFolderCount + pageSize, indexManager.indexedFolders.count)
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.blue)
+                        .padding(.top, 4)
+                    }
+                }
             }
         }
         .padding(12)
@@ -228,17 +243,170 @@ struct IndexManagementView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    private func folderMetric(_ title: String, _ value: String) -> some View {
-        HStack(alignment: .top) {
-            Text(title)
+    private func folderRow(_ folder: IndexedFolder) -> some View {
+        let status = indexManager.status(for: folder)
+        let isSelected = selectedFolderID == folder.id
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Button {
+                    selectedFolderID = folder.id
+                    indexManager.selectedFolder = folder
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "folder.fill")
+                            .foregroundStyle(indexManager.isActiveFolder(folder) ? .blue : .secondary)
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                Text(URL(fileURLWithPath: folder.path).lastPathComponent)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .lineLimit(1)
+                                statusBadge(status)
+                            }
+                            Text(folder.path)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                HStack(spacing: 6) {
+                    Button {
+                        infoFolderID = folder.id
+                    } label: {
+                        Image(systemName: "info.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help(L("查看索引详情"))
+
+                    Button {
+                        Task { await indexManager.indexFolder(folder) }
+                    } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(indexManager.isActiveFolder(folder))
+                    .help(L("重新索引"))
+
+                    Menu {
+                        Button(L("查看文件")) { indexManager.selectedFolder = folder }
+                        Button(L("在 Finder 中显示")) { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder.path) }
+                        Button(L("清理索引"), role: .destructive) { pendingFolderAction = .clear(folder) }
+                        Button(L("移除文件夹"), role: .destructive) { pendingFolderAction = .remove(folder) }
+                            .disabled(indexManager.isActiveFolder(folder))
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .help(L("管理"))
+                }
                 .foregroundStyle(.secondary)
-                .frame(width: 58, alignment: .leading)
-            Text(value)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            ProgressView(value: progressValue(for: status))
+                .tint(progressTint(for: status))
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(primaryStatusText(folder: folder, status: status))
+                    Text(secondaryStatusText(folder: folder, status: status))
+                        .foregroundStyle(.tertiary)
+                }
+                .font(.caption)
+                Spacer()
+                Text(folder.lastIndexed?.formatted(date: .abbreviated, time: .shortened) ?? L("尚未完成"))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(12)
+        .background(isSelected ? Color.accentColor.opacity(0.09) : Color.primary.opacity(0.035))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func loadMoreFoldersIfNeeded(current folder: IndexedFolder) {
+        guard let lastVisible = visibleFolders.last, lastVisible.id == folder.id else { return }
+        guard visibleFolderCount < indexManager.indexedFolders.count else { return }
+        visibleFolderCount = min(visibleFolderCount + pageSize, indexManager.indexedFolders.count)
+    }
+
+    private func progressValue(for status: FolderIndexStatus) -> Double {
+        if status.isQueued { return 0 }
+        if status.phase == .failed && status.totalFiles == 0 { return 0 }
+        if status.phase == .idle { return 0 }
+        return status.progress
+    }
+
+    private func progressTint(for status: FolderIndexStatus) -> Color {
+        switch status.phase {
+        case .queued: return .orange
+        case .scanning, .indexing: return .blue
+        case .completed: return .green
+        case .failed: return .orange
+        case .idle: return .gray
+        }
+    }
+
+    private func primaryStatusText(folder: IndexedFolder, status: FolderIndexStatus) -> String {
+        if !status.statusText.isEmpty {
+            return status.statusText
+        }
+        return LF("%d 个支持文件", folder.fileCount)
+    }
+
+    private func secondaryStatusText(folder: IndexedFolder, status: FolderIndexStatus) -> String {
+        if let currentFilePath = status.currentFilePath, status.isActive {
+            return URL(fileURLWithPath: currentFilePath).lastPathComponent
+        }
+        if let queuePosition = status.queuePosition {
+            return LF("等待前方 %d 个任务", max(queuePosition - 1, 0))
+        }
+        if status.ocrIndexedFiles > 0 {
+            return LF("%d 个 OCR 文件", status.ocrIndexedFiles)
+        }
+        if status.failedFiles > 0 {
+            return LF("%d 个文件失败", status.failedFiles)
+        }
+        return LF("%d 文件", folder.fileCount)
+    }
+
+    private func statusBadge(_ status: FolderIndexStatus) -> some View {
+        Text(statusBadgeTitle(status))
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(statusBadgeColor(status))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(statusBadgeColor(status).opacity(0.12))
+            .clipShape(Capsule())
+    }
+
+    private func statusBadgeTitle(_ status: FolderIndexStatus) -> String {
+        switch status.phase {
+        case .queued: return L("队列中")
+        case .scanning: return L("扫描中")
+        case .indexing: return L("索引中")
+        case .completed: return L("已完成")
+        case .failed: return L("需关注")
+        case .idle: return L("空闲")
+        }
+    }
+
+    private func statusBadgeColor(_ status: FolderIndexStatus) -> Color {
+        switch status.phase {
+        case .queued: return .orange
+        case .scanning, .indexing: return .blue
+        case .completed: return .green
+        case .failed: return .orange
+        case .idle: return .secondary
+        }
     }
 
     private func performPendingFolderAction() {
@@ -251,6 +419,109 @@ struct IndexManagementView: View {
             selectedFolderID = indexManager.indexedFolders.first?.id
         }
         self.pendingFolderAction = nil
+    }
+}
+
+private struct FolderIndexInfoView: View {
+    let folder: IndexedFolder
+    let status: FolderIndexStatus
+    let isActive: Bool
+    let onReindex: () -> Void
+    let onClear: () -> Void
+    let onReveal: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(URL(fileURLWithPath: folder.path).lastPathComponent)
+                        .font(.title3.weight(.semibold))
+                    Text(folder.path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                Spacer()
+                Image(systemName: "info.circle.fill")
+                    .foregroundStyle(.blue)
+            }
+
+            VStack(spacing: 0) {
+                detailMetric(L("状态"), statusText)
+                detailMetric(L("文件数"), "\(folder.fileCount)")
+                detailMetric(L("索引进度"), progressText)
+                detailMetric(L("失败数"), "\(status.failedFiles)")
+                detailMetric(L("OCR 文件"), "\(status.ocrIndexedFiles)")
+                detailMetric(L("OCR 模式"), AppSettings.shared.enableImageOCR ? L("已开启") : L("未开启"))
+                detailMetric(L("上次索引"), folder.lastIndexed?.formatted(date: .abbreviated, time: .shortened) ?? L("尚未完成"))
+                if let startedAt = status.startedAt {
+                    detailMetric(L("开始时间"), startedAt.formatted(date: .abbreviated, time: .shortened))
+                }
+                if let finishedAt = status.finishedAt {
+                    detailMetric(L("结束时间"), finishedAt.formatted(date: .abbreviated, time: .shortened))
+                }
+            }
+            .background(Color.primary.opacity(0.04))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            if let currentFilePath = status.currentFilePath {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(isActive ? L("当前文件") : L("最近文件"))
+                        .font(.caption.weight(.semibold))
+                    Text(currentFilePath)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
+            if let lastErrorDescription = status.lastErrorDescription, !lastErrorDescription.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L("最近错误"))
+                        .font(.caption.weight(.semibold))
+                    Text(lastErrorDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack {
+                Button(L("在 Finder 中显示"), action: onReveal)
+                Button(L("清理索引"), role: .destructive, action: onClear)
+                Spacer()
+                Button(L("重新索引"), action: onReindex)
+                    .disabled(isActive)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 440, minHeight: 360, alignment: .topLeading)
+    }
+
+    private var statusText: String {
+        if status.statusText.isEmpty {
+            return L("空闲")
+        }
+        return status.statusText
+    }
+
+    private var progressText: String {
+        if status.totalFiles > 0 {
+            return "\(status.completedFiles)/\(status.totalFiles)"
+        }
+        return status.phase == .completed ? "100%" : "0%"
+    }
+
+    private func detailMetric(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(title)
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .leading)
+            Text(value)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(.caption)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 }
 

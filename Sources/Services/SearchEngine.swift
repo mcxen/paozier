@@ -1,6 +1,8 @@
 import Foundation
+import CryptoKit
 import DFSearchKit
 import DSFFullTextSearchIndex
+import ImageIO
 import PDFKit
 import Vision
 
@@ -13,18 +15,23 @@ actor SearchEngine {
     private let dataDir: URL
     private let skPath: URL
     private let ftsPath: URL
+    private let extractedTextCacheDir: URL
 
     // Settings cache (updated from AppSettings on main actor)
     var _settingsLimit: Int = 30
     var _settingsSKWeight: Double = 0.6
     var _settingsFTSWeight: Double = 0.4
     var _searchFilenames: Bool = true
+    var _enableImageOCR: Bool = false
+    var _imageOCRScope: String = ImageOCRScope.markdownOnly.rawValue
 
-    func updateSettings(limit: Int, skWeight: Double, ftsWeight: Double, searchFilenames: Bool = true) {
+    func updateSettings(limit: Int, skWeight: Double, ftsWeight: Double, searchFilenames: Bool = true, enableImageOCR: Bool = false, imageOCRScope: String = ImageOCRScope.markdownOnly.rawValue) {
         _settingsLimit = limit
         _settingsSKWeight = skWeight
         _settingsFTSWeight = ftsWeight
         _searchFilenames = searchFilenames
+        _enableImageOCR = enableImageOCR
+        _imageOCRScope = imageOCRScope
     }
 
     init() {
@@ -32,7 +39,9 @@ actor SearchEngine {
         dataDir = appSupport.appendingPathComponent("Paozier", isDirectory: true)
         skPath = dataDir.appendingPathComponent("searchkit.index")
         ftsPath = dataDir.appendingPathComponent("fts.db")
+        extractedTextCacheDir = dataDir.appendingPathComponent("extracted-text-cache", isDirectory: true)
         try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: extractedTextCacheDir, withIntermediateDirectories: true)
     }
 
     func open() {
@@ -61,8 +70,8 @@ actor SearchEngine {
 
     // MARK: - Indexing
 
-    func indexFile(at fileURL: URL) throws {
-        let content = try extractText(from: fileURL)
+    func indexFile(at fileURL: URL, forceImageOCR: Bool = false) throws {
+        let content = try extractText(from: fileURL, allowOCRGeneration: true, forceImageOCR: forceImageOCR)
         guard !content.isEmpty else { return }
 
         let normalized = Self.normalizeForSearch(content)
@@ -209,7 +218,7 @@ actor SearchEngine {
         return combined.prefix(effectiveLimit).map { item in
             let path = item.url.path
             let fileName = item.url.lastPathComponent
-            let content = Self.normalizeForSearch((try? extractText(from: item.url)) ?? "")
+            let content = Self.normalizeForSearch((try? extractText(from: item.url, allowOCRGeneration: false)) ?? "")
             let snippet: String
             if item.score <= 0.3 && _searchFilenames {
                 snippet = LF("文件名匹配: %@", fileName)
@@ -281,7 +290,7 @@ actor SearchEngine {
         for url in allIndexedURLs() {
             if existing.contains(url.path) { continue }
             guard fileAllowed(url, extensions: options.allowedExtensions, folderPaths: options.folderPaths) else { continue }
-            let content = ((try? extractText(from: url)) ?? "").lowercased()
+            let content = ((try? extractText(from: url, allowOCRGeneration: false)) ?? "").lowercased()
             guard containsTermsInOrder(terms, in: content) else { continue }
             matches.append((score: 0.25, url: url))
             if matches.count >= limit { break }
@@ -320,11 +329,41 @@ actor SearchEngine {
 
     // MARK: - Text Extraction
 
-    private func extractText(from url: URL) throws -> String {
+    func canRunImageOCR(for url: URL) -> Bool {
+        Self.imageExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    func previewText(for url: URL) -> String {
+        if let cached = try? cachedExtractedText(for: url.standardizedFileURL) {
+            return cached
+        }
+        return (try? extractText(from: url, allowOCRGeneration: false)) ?? ""
+    }
+
+    private func extractText(from url: URL, allowOCRGeneration: Bool = true, forceImageOCR: Bool = false) throws -> String {
+        let normalizedURL = url.standardizedFileURL
+        if Self.imageExtensions.contains(normalizedURL.pathExtension.lowercased()),
+           !shouldIndexStandaloneImage(forceImageOCR: forceImageOCR) {
+            return ""
+        }
+        if let cached = try cachedExtractedText(for: normalizedURL) {
+            return cached
+        }
+
+        let content = try rawExtractText(from: normalizedURL, allowOCRGeneration: allowOCRGeneration, forceImageOCR: forceImageOCR)
+        if !content.isEmpty {
+            try storeExtractedText(content, for: normalizedURL)
+        }
+        return content
+    }
+
+    private func rawExtractText(from url: URL, allowOCRGeneration: Bool, forceImageOCR: Bool) throws -> String {
         let ext = url.pathExtension.lowercased()
         switch ext {
         case "pdf":
             return extractPDFText(from: url)
+        case "md", "markdown":
+            return try extractMarkdownText(from: url, allowOCRGeneration: allowOCRGeneration)
         case "docx":
             return try extractDocxText(from: url)
         case "pptx":
@@ -338,9 +377,36 @@ actor SearchEngine {
         case "html", "htm", "xml":
             let raw = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             return stripMarkup(raw)
+        case let ext where Self.imageExtensions.contains(ext):
+            guard shouldIndexStandaloneImage(forceImageOCR: forceImageOCR) else { return "" }
+            guard allowOCRGeneration else { return "" }
+            return try extractImageOCRText(from: url)
         default:
             return decodeText(try Data(contentsOf: url)) ?? ""
         }
+    }
+
+    private func extractMarkdownText(from url: URL, allowOCRGeneration: Bool) throws -> String {
+        let markdown = decodeText(try Data(contentsOf: url)) ?? ""
+        guard _enableImageOCR, allowOCRGeneration else { return markdown }
+
+        let imageURLs = Self.markdownImageURLs(in: markdown, markdownURL: url)
+        guard !imageURLs.isEmpty else { return markdown }
+
+        var ocrBlocks: [String] = []
+        var seen: Set<String> = []
+        for imageURL in imageURLs {
+            let normalized = imageURL.standardizedFileURL.path
+            guard Self.imageExtensions.contains(imageURL.pathExtension.lowercased()) else { continue }
+            guard seen.insert(normalized).inserted else { continue }
+            let text = (try? extractImageOCRText(from: imageURL))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !text.isEmpty {
+                ocrBlocks.append(text)
+            }
+        }
+
+        guard !ocrBlocks.isEmpty else { return markdown }
+        return markdown + "\n\n" + ocrBlocks.joined(separator: "\n\n")
     }
 
     private func extractPDFText(from url: URL) -> String {
@@ -381,11 +447,51 @@ actor SearchEngine {
             semaphore.signal()
         }
         request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en-US"]
+        request.recognitionLanguages = Self.defaultOCRLanguages
+        request.automaticallyDetectsLanguage = true
+        request.usesLanguageCorrection = true
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         try? handler.perform([request])
         semaphore.wait()
         return ocrText
+    }
+
+    private func extractImageOCRText(from url: URL) throws -> String {
+        guard let cgImage = createOCRImage(from: url) else { return "" }
+        return recognizeText(in: cgImage)
+    }
+
+    private func createOCRImage(from url: URL) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: CFDictionary = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 2400
+        ] as CFDictionary
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options)
+            ?? CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+
+    private func recognizeText(in cgImage: CGImage) -> String {
+        let semaphore = DispatchSemaphore(value: 0)
+        var recognizedText = ""
+        let request = VNRecognizeTextRequest { request, _ in
+            let observations = request.results as? [VNRecognizedTextObservation] ?? []
+            recognizedText = observations
+                .compactMap { $0.topCandidates(1).first?.string }
+                .joined(separator: "\n")
+            semaphore.signal()
+        }
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = Self.defaultOCRLanguages
+        request.automaticallyDetectsLanguage = true
+        request.usesLanguageCorrection = true
+        request.minimumTextHeight = 0.015
+
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try? handler.perform([request])
+        semaphore.wait()
+        return recognizedText
     }
 
     private func extractDocxText(from url: URL) throws -> String {
@@ -461,7 +567,7 @@ actor SearchEngine {
         if url.pathExtension.lowercased() == "pdf" {
             content = extractPDFText(from: url)
         } else {
-            content = (try? extractText(from: url)) ?? ""
+            content = (try? extractText(from: url, allowOCRGeneration: false)) ?? ""
         }
         guard !content.isEmpty else { return "" }
 
@@ -516,6 +622,68 @@ actor SearchEngine {
             if let text = String(data: data, encoding: encoding) { return text }
         }
         return nil
+    }
+
+    private func cachedExtractedText(for url: URL) throws -> String? {
+        let cacheURL = try extractedTextCacheURL(for: url)
+        guard FileManager.default.fileExists(atPath: cacheURL.path) else { return nil }
+        return try String(contentsOf: cacheURL, encoding: .utf8)
+    }
+
+    private func storeExtractedText(_ text: String, for url: URL) throws {
+        let cacheURL = try extractedTextCacheURL(for: url)
+        try text.write(to: cacheURL, atomically: true, encoding: .utf8)
+    }
+
+    private func extractedTextCacheURL(for url: URL) throws -> URL {
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
+        let modified = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+        let fingerprint = "\(url.path)|\(modified)|\(size)|ocr:\(_enableImageOCR)|scope:\(_imageOCRScope)|v3"
+        let digest = SHA256.hash(data: Data(fingerprint.utf8)).map { String(format: "%02x", $0) }.joined()
+        return extractedTextCacheDir.appendingPathComponent("\(digest).txt")
+    }
+
+    private func shouldIndexStandaloneImage(forceImageOCR: Bool) -> Bool {
+        if forceImageOCR { return true }
+        guard _enableImageOCR else { return false }
+        return currentImageOCRScope == .markdownAndStandalone
+    }
+
+    private var currentImageOCRScope: ImageOCRScope {
+        ImageOCRScope(rawValue: _imageOCRScope) ?? .markdownOnly
+    }
+
+    private static let imageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "heic", "tif", "tiff", "bmp", "gif", "webp"
+    ]
+
+    private static let defaultOCRLanguages = ["zh-Hans", "zh-Hant", "en-US"]
+
+    static func markdownImageURLs(in markdown: String, markdownURL: URL) -> [URL] {
+        let pattern = #"!\[[^\]]*\]\(([^)\n]+)\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        let nsRange = NSRange(markdown.startIndex..<markdown.endIndex, in: markdown)
+        return regex.matches(in: markdown, range: nsRange).compactMap { match in
+            guard let range = Range(match.range(at: 1), in: markdown) else { return nil }
+            var rawPath = String(markdown[range])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
+            if let titleSplit = rawPath.firstIndex(of: " ") {
+                rawPath = String(rawPath[..<titleSplit])
+            }
+            guard !rawPath.isEmpty,
+                  !rawPath.hasPrefix("http://"),
+                  !rawPath.hasPrefix("https://"),
+                  !rawPath.hasPrefix("data:") else { return nil }
+            let resolvedURL: URL
+            if rawPath.hasPrefix("/") {
+                resolvedURL = URL(fileURLWithPath: rawPath)
+            } else {
+                resolvedURL = URL(fileURLWithPath: rawPath, relativeTo: markdownURL.deletingLastPathComponent()).standardizedFileURL
+            }
+            return resolvedURL
+        }
     }
 
     private func stripMarkup(_ text: String) -> String {

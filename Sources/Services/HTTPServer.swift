@@ -122,13 +122,9 @@ class HTTPServer {
                 return Self.response(status: 403, body: "Forbidden")
             }
             let url = URL(fileURLWithPath: filePath)
-            let ext = url.pathExtension.lowercased()
-            let textExts: Set<String> = ["txt","md","markdown","json","csv","tsv","log","yaml","yml","toml","ini","conf","xml","html","htm","swift","py","js","ts","java","c","h","cpp","rs","go","rb","php","sh","rtf"]
-            guard textExts.contains(ext) else {
-                return Self.response(status: 415, body: "Not a text file")
-            }
-            guard let content = try? String(contentsOf: url, encoding: .utf8) else {
-                return Self.response(status: 500, body: "Cannot read file")
+            let content = await SearchEngine.shared.previewText(for: url)
+            guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return Self.response(status: 415, body: "Preview unavailable")
             }
             let truncated = String(content.prefix(32000))
             return Self.response(status: 200, body: truncated, contentType: "text/plain; charset=utf-8")

@@ -89,6 +89,48 @@ struct IndexedFolder: Identifiable, Codable {
     }
 }
 
+enum FolderIndexPhase: String {
+    case idle
+    case queued
+    case scanning
+    case indexing
+    case completed
+    case failed
+}
+
+struct FolderIndexStatus: Equatable {
+    var phase: FolderIndexPhase = .idle
+    var completedFiles: Int = 0
+    var totalFiles: Int = 0
+    var failedFiles: Int = 0
+    var ocrIndexedFiles: Int = 0
+    var queuePosition: Int?
+    var statusText: String = ""
+    var currentFilePath: String?
+    var startedAt: Date?
+    var finishedAt: Date?
+    var lastErrorDescription: String?
+
+    var progress: Double {
+        guard totalFiles > 0 else {
+            return phase == .completed ? 1 : 0
+        }
+        return min(max(Double(completedFiles) / Double(totalFiles), 0), 1)
+    }
+
+    var isQueued: Bool {
+        phase == .queued
+    }
+
+    var isActive: Bool {
+        phase == .scanning || phase == .indexing
+    }
+
+    var isTerminal: Bool {
+        phase == .completed || phase == .failed
+    }
+}
+
 // MARK: - Compendium
 
 struct CompendiumEntry: Identifiable, Codable, Hashable {

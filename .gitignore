@@ -3,3 +3,7 @@ solr/
 .swiftpm/
 dist/
 .DS_Store
+__pycache__/
+*.pyc
+Sources/TUI/.venv/
+Sources/TUI/__pycache__/

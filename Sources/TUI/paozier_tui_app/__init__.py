@@ -1,0 +1,1 @@
+"""Paozier TUI package."""

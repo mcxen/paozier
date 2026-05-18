@@ -70,6 +70,8 @@ struct SettingsView: View {
         .onChange(of: settings.searchFilenames) { _, _ in settings.save() }
         .onChange(of: settings.languagePreference) { _, _ in settings.save() }
         .onChange(of: settings.matchContextChars) { _, _ in settings.save() }
+        .onChange(of: settings.enableImageOCR) { _, _ in settings.save() }
+        .onChange(of: settings.imageOCRScope) { _, _ in settings.save() }
     }
 
     // MARK: - General
@@ -154,6 +156,22 @@ struct SettingsView: View {
 
     private var indexTab: some View {
         Form {
+            Section(L("图片 OCR")) {
+                Toggle(L("启用图片 OCR 索引"), isOn: $settings.enableImageOCR)
+                if settings.enableImageOCR {
+                    Picker(L("OCR 来源"), selection: $settings.imageOCRScope) {
+                        ForEach(ImageOCRScope.allCases) { scope in
+                            Text(scope.displayName).tag(scope.rawValue)
+                        }
+                    }
+                }
+                Text(L("开启后会把图片中的识别文字写入索引，首次索引会更慢。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L("仅 Markdown 图片会把 Markdown 引用图像的 OCR 文本并入文档索引；Markdown + 独立图片会额外索引未被 Markdown 引用的图片文件。"))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
             Section(L("排除的文件扩展名")) {
                 HStack {
                     TextField(L("扩展名（如 log）"), text: $newExtension).textFieldStyle(.roundedBorder)

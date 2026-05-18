@@ -13,6 +13,7 @@ let package = Package(
             name: "Paozier",
             dependencies: ["DSFFullTextSearchIndex", "DFSearchKit"],
             path: "Sources",
+            exclude: ["TUI"],
             resources: [.process("Resources")]
         )
     ]

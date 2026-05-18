@@ -23,6 +23,7 @@ Search results with indexed content preview:
 - Incremental indexing, multi-folder management
 - Built-in HTTP search service (port 9880)
 - Built-in MCP server (port 9881) for AI tool integration
+- Bundled Textual terminal client (TUI)
 - Search history, bookmarks, reports
 
 ## Supported Formats
@@ -68,6 +69,17 @@ No Java, Solr, or external dependencies required.
 2. Wait for indexing to complete
 3. Type keywords in the search bar to search
 4. Click results to preview with highlighted snippets
+
+### TUI Client
+
+The repo also includes a Textual-based terminal client. Details live in [Sources/TUI/README.md](/Users/mcx/Documents/OpenSpring/paozier/Sources/TUI/README.md).
+
+```bash
+cd Sources/TUI
+./run_tui.command
+```
+
+On first launch it creates a local `.venv`, installs `Textual` / `httpx`, and tries to open the main app if the HTTP service is not ready. Common shortcuts: `Ctrl+F` search, `Ctrl+R` refresh, `Ctrl+O` open file, `Ctrl+E` reveal in Finder, `j/k` move, `Ctrl+Q` quit.
 
 ### HTTP API
 

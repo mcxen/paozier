@@ -7,6 +7,7 @@ struct FolderContentView: View {
 
     @State private var files: [URL] = []
     @State private var selectedFile: URL?
+    @State private var fileActionMessage = ""
 
     var body: some View {
         HSplitView {
@@ -42,6 +43,14 @@ struct FolderContentView: View {
                             .contextMenu {
                                 Button(L("打开文件")) { NSWorkspace.shared.open(file) }
                                 Button(L("在 Finder 中显示")) { NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "") }
+                                if indexManager.isImageFile(file) {
+                                    Button(L("执行图片 OCR 索引")) {
+                                        Task {
+                                            await indexManager.indexImageOCRFile(file, in: folder)
+                                            fileActionMessage = indexManager.statusMessage
+                                        }
+                                    }
+                                }
                             }
                     }
                     .listStyle(.plain)
@@ -62,6 +71,19 @@ struct FolderContentView: View {
                                 .lineLimit(1)
                         }
                         Spacer()
+                        if indexManager.isImageFile(selectedFile) {
+                            Button {
+                                Task {
+                                    await indexManager.indexImageOCRFile(selectedFile, in: folder)
+                                    fileActionMessage = indexManager.statusMessage
+                                }
+                            } label: {
+                                Label(L("执行图片 OCR 索引"), systemImage: "text.viewfinder")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help(L("仅图片文件支持该操作"))
+                        }
                         Button { NSWorkspace.shared.open(selectedFile) } label: {
                             Label(L("打开"), systemImage: "arrow.up.right.square")
                         }
@@ -77,6 +99,19 @@ struct FolderContentView: View {
                     .background(.regularMaterial)
 
                     Divider()
+                    if !fileActionMessage.isEmpty {
+                        HStack {
+                            Text(fileActionMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.primary.opacity(0.035))
+                        Divider()
+                    }
                     PDFPreviewView(filePath: selectedFile.path)
                 } else {
                     ContentUnavailableView(L("选择文件预览"), systemImage: "doc.text.magnifyingglass")
@@ -86,6 +121,7 @@ struct FolderContentView: View {
         }
         .onAppear(perform: reloadFiles)
         .onChange(of: folder.id) { _, _ in reloadFiles() }
+        .onChange(of: selectedFile?.path) { _, _ in fileActionMessage = "" }
     }
 
     private func reloadFiles() {
@@ -124,6 +160,7 @@ private struct FolderFileRow: View {
         case "xlsx", "xls", "csv", "tsv", "ods": return "tablecells.fill"
         case "pptx", "ppt", "odp": return "rectangle.fill.on.rectangle.fill"
         case "html", "htm", "epub": return "globe"
+        case "png", "jpg", "jpeg", "heic", "tif", "tiff", "bmp", "gif", "webp": return "photo"
         default: return "doc.text.fill"
         }
     }
@@ -135,6 +172,7 @@ private struct FolderFileRow: View {
         case "xlsx", "xls", "csv", "tsv", "ods": return .green
         case "pptx", "ppt", "odp": return .orange
         case "html", "htm", "epub": return .purple
+        case "png", "jpg", "jpeg", "heic", "tif", "tiff", "bmp", "gif", "webp": return .pink
         default: return .gray
         }
     }

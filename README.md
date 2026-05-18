@@ -23,6 +23,7 @@ macOS 本地全文搜索客户端，基于 Apple SearchKit + SQLite FTS5 双引�
 - 增量索引，多文件夹管理
 - 内置 HTTP 搜索服务（端口 9880）
 - 内置 MCP 服务器（端口 9881），供 AI 工具集成
+- 附带 Textual 终端客户端（TUI）
 - 搜索历史、书签、报告收集
 
 ## 支持格式
@@ -68,6 +69,17 @@ swift run Paozier
 2. 等待索引完成
 3. 在搜索栏输入关键词即可搜索
 4. 点击结果查看预览和高亮片段
+
+### TUI 客户端
+
+项目附带一个基于 Textual 的终端客户端，说明见 [Sources/TUI/README.md](/Users/mcx/Documents/OpenSpring/paozier/Sources/TUI/README.md)。
+
+```bash
+cd Sources/TUI
+./run_tui.command
+```
+
+首次运行会自动创建本地 `.venv`、安装 `Textual` / `httpx` 依赖，并在必要时尝试拉起主应用。常用快捷键：`Ctrl+F` 搜索、`Ctrl+R` 刷新、`Ctrl+O` 打开文件、`Ctrl+E` 在 Finder 中显示、`j/k` 上下移动、`Ctrl+Q` 退出。
 
 ### HTTP API
 

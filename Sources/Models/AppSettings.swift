@@ -1,5 +1,21 @@
 import Foundation
 
+enum ImageOCRScope: String, CaseIterable, Identifiable, Codable {
+    case markdownOnly = "markdown_only"
+    case markdownAndStandalone = "markdown_and_standalone"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .markdownOnly:
+            return L("仅 Markdown 图片")
+        case .markdownAndStandalone:
+            return L("Markdown + 独立图片")
+        }
+    }
+}
+
 @MainActor
 class AppSettings: ObservableObject, Codable {
     static let shared = AppSettings()
@@ -17,6 +33,8 @@ class AppSettings: ObservableObject, Codable {
     @Published var searchFilenames: Bool = true
     @Published var languagePreference: String = AppLanguagePreference.system.rawValue
     @Published var matchContextChars: Int = 40
+    @Published var enableImageOCR: Bool = false
+    @Published var imageOCRScope: String = ImageOCRScope.markdownOnly.rawValue
 
     private static var filePath: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -28,7 +46,7 @@ class AppSettings: ObservableObject, Codable {
     enum CodingKeys: String, CodingKey {
         case searchResultLimit, searchEngineWeightSK, searchEngineWeightFTS
         case httpPort, httpAutoStart, mcpPort, mcpAutoStart
-        case defaultPreviewMode, historyMaxItems, excludedExtensions, searchFilenames, languagePreference, matchContextChars
+        case defaultPreviewMode, historyMaxItems, excludedExtensions, searchFilenames, languagePreference, matchContextChars, enableImageOCR, imageOCRScope
     }
 
     init() { load() }
@@ -48,6 +66,8 @@ class AppSettings: ObservableObject, Codable {
         searchFilenames = (try? c.decode(Bool.self, forKey: .searchFilenames)) ?? true
         languagePreference = (try? c.decode(String.self, forKey: .languagePreference)) ?? AppLanguagePreference.system.rawValue
         matchContextChars = (try? c.decode(Int.self, forKey: .matchContextChars)) ?? 40
+        enableImageOCR = (try? c.decode(Bool.self, forKey: .enableImageOCR)) ?? false
+        imageOCRScope = (try? c.decode(String.self, forKey: .imageOCRScope)) ?? ImageOCRScope.markdownOnly.rawValue
     }
 
     func encode(to encoder: Encoder) throws {
@@ -65,6 +85,8 @@ class AppSettings: ObservableObject, Codable {
         try c.encode(searchFilenames, forKey: .searchFilenames)
         try c.encode(languagePreference, forKey: .languagePreference)
         try c.encode(matchContextChars, forKey: .matchContextChars)
+        try c.encode(enableImageOCR, forKey: .enableImageOCR)
+        try c.encode(imageOCRScope, forKey: .imageOCRScope)
     }
 
     func save() {
@@ -88,6 +110,8 @@ class AppSettings: ObservableObject, Codable {
         searchFilenames = decoded.searchFilenames
         languagePreference = decoded.languagePreference
         matchContextChars = decoded.matchContextChars
+        enableImageOCR = decoded.enableImageOCR
+        imageOCRScope = decoded.imageOCRScope
         UserDefaults.standard.set(languagePreference, forKey: "languagePreference")
     }
 }

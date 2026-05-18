@@ -175,7 +175,8 @@ struct SidebarView: View {
     }
 
     private func folderRow(_ folder: IndexedFolder) -> some View {
-        Button {
+        let status = indexManager.status(for: folder)
+        return Button {
             indexManager.selectedFolder = folder
         } label: {
             HStack(spacing: 8) {
@@ -184,12 +185,26 @@ struct SidebarView: View {
                     .font(.caption)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(URL(fileURLWithPath: folder.path).lastPathComponent)
-                        .font(.callout.weight(indexManager.selectedFolder?.id == folder.id ? .semibold : .regular))
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(URL(fileURLWithPath: folder.path).lastPathComponent)
+                            .font(.callout.weight(indexManager.selectedFolder?.id == folder.id ? .semibold : .regular))
+                            .lineLimit(1)
+                        if status.phase == .queued {
+                            Image(systemName: "clock")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        } else if status.isActive {
+                            ProgressView(value: status.progress)
+                                .controlSize(.mini)
+                                .frame(width: 28)
+                        }
+                    }
                     HStack(spacing: 4) {
                         Text(LF("%d 文件", folder.fileCount))
-                        if let lastIndexed = folder.lastIndexed {
+                        if status.phase == .queued, let queuePosition = status.queuePosition {
+                            Text("·")
+                            Text(LF("第 %d 个", queuePosition))
+                        } else if let lastIndexed = folder.lastIndexed {
                             Text("·")
                             Text(lastIndexed, style: .relative)
                         }
