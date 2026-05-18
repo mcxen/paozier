@@ -119,7 +119,8 @@ struct TextFilePreviewNS: NSViewRepresentable {
         let secondaryRanges = ranges(for: secondarySearchTerms, in: content)
 
         for nsRange in primaryRanges {
-            storage.addAttribute(.backgroundColor, value: NSColor.yellow, range: nsRange)
+            storage.addAttribute(.backgroundColor, value: NSColor.systemYellow, range: nsRange)
+            storage.addAttribute(.foregroundColor, value: NSColor.black, range: nsRange)
         }
         for nsRange in secondaryRanges {
             storage.addAttribute(.backgroundColor, value: NSColor.systemCyan.withAlphaComponent(0.55), range: nsRange)

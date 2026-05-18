@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var documentMatchesCollapsed = false
     @State private var documentMatchesHeight: CGFloat = 190
+    @State private var documentMatchJumpCycle = 0
     @FocusState private var searchFieldFocused: Bool
     @FocusState private var previewFindFocused: Bool
 
@@ -403,7 +404,8 @@ struct ContentView: View {
                 Divider()
                 List(matches) { match in
                     Button {
-                        primaryMatchStep = match.id
+                        documentMatchJumpCycle += 1
+                        primaryMatchStep = match.id - max(matches.count, 1) * documentMatchJumpCycle
                     } label: {
                         HStack(alignment: .top, spacing: 8) {
                             Text("\(match.id + 1)")
@@ -616,13 +618,26 @@ struct ContentView: View {
 
     private func appendSearchResults(_ newItems: [SearchResult]) {
         guard !newItems.isEmpty else { return }
-        let existingPaths = Set(results.map(\.filePath))
-        let uniqueItems = newItems.filter { !existingPaths.contains($0.filePath) }
-        guard !uniqueItems.isEmpty else { return }
+        var didChange = false
 
         withAnimation(.smooth(duration: 0.18)) {
-            results.append(contentsOf: uniqueItems)
-            if selectedResult == nil {
+            for item in newItems {
+                if let idx = results.firstIndex(where: { $0.filePath == item.filePath }) {
+                    let existing = results[idx]
+                    if item.content.count > existing.content.count {
+                        results[idx] = item
+                        if selectedResult?.filePath == item.filePath {
+                            selectedResult = item
+                        }
+                        didChange = true
+                    }
+                } else {
+                    results.append(item)
+                    didChange = true
+                }
+            }
+
+            if didChange, selectedResult == nil {
                 selectedResult = results.first
             }
         }

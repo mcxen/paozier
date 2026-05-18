@@ -261,11 +261,18 @@ private struct MarkdownWebPreview: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        webView.loadHTMLString(renderHTML(), baseURL: baseURL)
+        let html = renderHTML()
+        let htmlURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("paozier-markdown-preview", isDirectory: true)
+            .appendingPathComponent("\(abs(markdown.hashValue)).html")
+        try? FileManager.default.createDirectory(at: htmlURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? html.write(to: htmlURL, atomically: true, encoding: .utf8)
+        webView.loadFileURL(htmlURL, allowingReadAccessTo: URL(fileURLWithPath: "/"))
     }
 
     private func renderHTML() -> String {
         let markdownJSON = jsonString(markdown)
+        let basePathJSON = jsonString(baseURL.path)
         let primaryTermsJSON = json(primaryTerms)
         let secondaryTermsJSON = json(secondaryTerms)
         let markedScript = Self.markedScript
@@ -352,6 +359,16 @@ private struct MarkdownWebPreview: NSViewRepresentable {
           max-width: 100%;
           height: auto;
         }
+        img.missing-image {
+          display: inline-flex;
+          min-width: 160px;
+          min-height: 42px;
+          padding: 10px 12px;
+          border: 1px dashed color-mix(in srgb, CanvasText 28%, transparent);
+          border-radius: 6px;
+          color: color-mix(in srgb, CanvasText 58%, transparent);
+          background: color-mix(in srgb, CanvasText 5%, transparent);
+        }
         table {
           display: block;
           width: max-content;
@@ -394,6 +411,7 @@ private struct MarkdownWebPreview: NSViewRepresentable {
         </script>
         <script>
         const markdownSource = \(markdownJSON);
+        const markdownBasePath = \(basePathJSON);
         const primaryTerms = \(primaryTermsJSON);
         const secondaryTerms = \(secondaryTermsJSON);
         const markedAPI = window.marked && (window.marked.parse ? window.marked : (window.marked.marked ? window.marked.marked : null));
@@ -407,6 +425,7 @@ private struct MarkdownWebPreview: NSViewRepresentable {
         const content = document.getElementById('content');
         content.innerHTML = markedAPI.parse(markdownSource);
         sanitize(content);
+        resolveMarkdownImages(content, markdownBasePath);
         document.querySelectorAll('a[href]').forEach(a => {
           a.target = '_blank';
           a.rel = 'noreferrer';
@@ -428,6 +447,32 @@ private struct MarkdownWebPreview: NSViewRepresentable {
               }
             }
           });
+        }
+        function resolveMarkdownImages(root, basePath) {
+          root.querySelectorAll('img[src]').forEach(img => {
+            const raw = img.getAttribute('src') || '';
+            const resolved = resolveMarkdownURL(raw, basePath);
+            if (resolved) img.setAttribute('src', resolved);
+            img.addEventListener('error', () => {
+              img.classList.add('missing-image');
+              img.setAttribute('alt', img.getAttribute('alt') || raw);
+            });
+          });
+        }
+        function resolveMarkdownURL(raw, basePath) {
+          let value = raw.trim().replace(/^<|>$/g, '').replace(/^['"]|['"]$/g, '');
+          if (!value) return value;
+          if (/^(https?:|data:|blob:)/i.test(value)) return value;
+          if (/^file:/i.test(value)) return encodeURI(decodeURI(value));
+          value = value.split('#')[0].split('?')[0] + (value.includes('?') ? '?' + value.split('?').slice(1).join('?') : '');
+          try {
+            if (value.startsWith('/')) return new URL('file://' + value).href;
+            const base = new URL('file://' + basePath.replace(/\\/$/, '') + '/');
+            return new URL(value, base).href;
+          } catch (_) {
+            const joined = basePath.replace(/\\/$/, '') + '/' + value.replace(/^\\.\\//, '');
+            return 'file://' + joined.split('/').map((part, idx) => idx === 0 ? part : encodeURIComponent(decodeURIComponent(part))).join('/');
+          }
         }
         function walk(node, terms, className) {
           if (!terms.length || ['SCRIPT','STYLE','CODE','PRE'].includes(node.parentNode?.nodeName)) return;
@@ -488,6 +533,7 @@ private struct MarkdownWebPreview: NSViewRepresentable {
         let candidates = [
             Bundle.module.url(forResource: "marked.umd", withExtension: "js"),
             Bundle.main.url(forResource: "marked.umd", withExtension: "js"),
+            Bundle.main.resourceURL?.appendingPathComponent("Paozier_Paozier.bundle/Contents/Resources/marked.umd.js"),
             Bundle.main.resourceURL?.appendingPathComponent("Paozier_Paozier.bundle/marked.umd.js"),
             Bundle.main.resourceURL?.appendingPathComponent("marked.umd.js")
         ]
