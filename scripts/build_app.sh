@@ -88,6 +88,11 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <false/>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Paozier runs local HTTP and MCP servers for search access.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
 </dict>
 </plist>
 PLIST

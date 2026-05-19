@@ -13,7 +13,7 @@ final class SettingsWindowController {
             return
         }
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 540, height: 440),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -34,6 +34,7 @@ struct SettingsView: View {
     @State private var newExtension = ""
     @State private var showClearConfirm = false
     @State private var clearTarget = ""
+    @State private var memosValidationMessages: [String: String] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,12 +52,13 @@ struct SettingsView: View {
                 generalTab.tabItem { Label(L("通用"), systemImage: "slider.horizontal.3") }
                 searchTab.tabItem { Label(L("搜索"), systemImage: "magnifyingglass") }
                 servicesTab.tabItem { Label(L("服务"), systemImage: "network") }
+                externalTab.tabItem { Label(L("外部源"), systemImage: "point.3.connected.trianglepath.dotted") }
                 indexTab.tabItem { Label(L("索引"), systemImage: "tray.full") }
                 dataTab.tabItem { Label(L("数据"), systemImage: "externaldrive") }
             }
             .padding(16)
         }
-        .frame(width: 520, height: 420)
+        .frame(width: 620, height: 540)
         .onChange(of: settings.searchResultLimit) { _, _ in settings.save() }
         .onChange(of: settings.searchEngineWeightSK) { _, _ in settings.save() }
         .onChange(of: settings.searchEngineWeightFTS) { _, _ in settings.save() }
@@ -72,6 +74,7 @@ struct SettingsView: View {
         .onChange(of: settings.matchContextChars) { _, _ in settings.save() }
         .onChange(of: settings.enableImageOCR) { _, _ in settings.save() }
         .onChange(of: settings.imageOCRScope) { _, _ in settings.save() }
+        .onChange(of: settings.memosSources) { _, _ in settings.save() }
     }
 
     // MARK: - General
@@ -150,6 +153,89 @@ struct SettingsView: View {
             Text(L("端口修改需重启应用生效")).font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
+    }
+
+    // MARK: - External Sources
+
+    private var externalTab: some View {
+        Form {
+            Section(L("Memos 搜索源")) {
+                if settings.memosSources.isEmpty {
+                    Text(L("暂无 Memos 搜索源。添加后，网页端可以选择同时搜索 Memos。"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach($settings.memosSources) { $source in
+                        memosSourceEditor(source: $source)
+                    }
+                }
+                Button {
+                    settings.memosSources.append(MemosSourceConfig(name: nextMemosName()))
+                } label: {
+                    Label(L("添加 Memos 源"), systemImage: "plus.circle")
+                }
+            }
+            Section(L("说明")) {
+                Text(L("Token/SK 会按你的要求保存在本地 settings.json。请只在可信设备上使用。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L("源名称为空时会按顺序显示为 Memos 1、Memos 2。"))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func memosSourceEditor(source: Binding<MemosSourceConfig>) -> some View {
+        let sourceID = source.wrappedValue.id
+        let index = settings.memosSources.firstIndex { $0.id == sourceID } ?? 0
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Toggle("", isOn: source.isEnabled).labelsHidden()
+                Text(source.wrappedValue.displayName(index: index))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button(L("测试连接")) {
+                    testMemosSource(sourceID: sourceID)
+                }
+                .controlSize(.small)
+                Button(role: .destructive) {
+                    settings.memosSources.removeAll { $0.id == sourceID }
+                    memosValidationMessages.removeValue(forKey: sourceID)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+            }
+            TextField(L("源名称（可选）"), text: source.name)
+                .textFieldStyle(.roundedBorder)
+            TextField("https://memos.example.com", text: source.baseURL)
+                .textFieldStyle(.roundedBorder)
+            SecureField("Token / SK", text: source.token)
+                .textFieldStyle(.roundedBorder)
+            if let message = memosValidationMessages[sourceID] {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(message.hasPrefix("✓") ? .green : .red)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func nextMemosName() -> String {
+        "Memos \(settings.memosSources.count + 1)"
+    }
+
+    private func testMemosSource(sourceID: String) {
+        memosValidationMessages[sourceID] = L("测试中...")
+        Task {
+            let result = await MemosSearchService.shared.validate(sourceID: sourceID)
+            await MainActor.run {
+                memosValidationMessages[sourceID] = result.ok ? "✓ \(result.message)" : "✗ \(result.message)"
+            }
+        }
     }
 
     // MARK: - Index

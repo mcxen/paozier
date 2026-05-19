@@ -35,6 +35,7 @@ class AppSettings: ObservableObject, Codable {
     @Published var matchContextChars: Int = 40
     @Published var enableImageOCR: Bool = false
     @Published var imageOCRScope: String = ImageOCRScope.markdownOnly.rawValue
+    @Published var memosSources: [MemosSourceConfig] = []
 
     private static var filePath: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -46,7 +47,7 @@ class AppSettings: ObservableObject, Codable {
     enum CodingKeys: String, CodingKey {
         case searchResultLimit, searchEngineWeightSK, searchEngineWeightFTS
         case httpPort, httpAutoStart, mcpPort, mcpAutoStart
-        case defaultPreviewMode, historyMaxItems, excludedExtensions, searchFilenames, languagePreference, matchContextChars, enableImageOCR, imageOCRScope
+        case defaultPreviewMode, historyMaxItems, excludedExtensions, searchFilenames, languagePreference, matchContextChars, enableImageOCR, imageOCRScope, memosSources
     }
 
     init() { load() }
@@ -68,6 +69,7 @@ class AppSettings: ObservableObject, Codable {
         matchContextChars = (try? c.decode(Int.self, forKey: .matchContextChars)) ?? 40
         enableImageOCR = (try? c.decode(Bool.self, forKey: .enableImageOCR)) ?? false
         imageOCRScope = (try? c.decode(String.self, forKey: .imageOCRScope)) ?? ImageOCRScope.markdownOnly.rawValue
+        memosSources = (try? c.decode([MemosSourceConfig].self, forKey: .memosSources)) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -87,6 +89,7 @@ class AppSettings: ObservableObject, Codable {
         try c.encode(matchContextChars, forKey: .matchContextChars)
         try c.encode(enableImageOCR, forKey: .enableImageOCR)
         try c.encode(imageOCRScope, forKey: .imageOCRScope)
+        try c.encode(memosSources, forKey: .memosSources)
     }
 
     func save() {
@@ -112,6 +115,7 @@ class AppSettings: ObservableObject, Codable {
         matchContextChars = decoded.matchContextChars
         enableImageOCR = decoded.enableImageOCR
         imageOCRScope = decoded.imageOCRScope
+        memosSources = decoded.memosSources
         UserDefaults.standard.set(languagePreference, forKey: "languagePreference")
     }
 }

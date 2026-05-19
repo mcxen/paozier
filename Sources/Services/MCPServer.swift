@@ -10,6 +10,7 @@ class MCPServer {
     private static let toolsJSON = """
     [
       {"name":"search_documents","description":"Full-text search across all indexed documents. Returns structured results optimized for LLM consumption with exact-match snippets.","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search keywords"},"limit":{"type":"integer","description":"Max results (default 10)"},"context_chars":{"type":"integer","description":"Characters of context before/after each match (default 100)"},"include_content":{"type":"boolean","description":"Include full document text in results (default false)"},"max_content_length":{"type":"integer","description":"Max chars of full content per result when include_content=true (default 8000)"}},"required":["query"]}},
+      {"name":"search_memos","description":"Search configured Memos sources. Source labels come from user settings, falling back to Memos 1, Memos 2, etc.","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search keywords"},"limit":{"type":"integer","description":"Max results per enabled source (default 10)"},"include_content":{"type":"boolean","description":"Include full memo content (default false)"},"max_content_length":{"type":"integer","description":"Max chars of memo content when include_content=true (default 4000)"}},"required":["query"]}},
       {"name":"grep_search","description":"Fast direct grep search across files in indexed folders. Finds recently changed files without waiting for indexing.","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search keywords or regex"},"limit":{"type":"integer","description":"Max results (default 20)"},"regex":{"type":"boolean","description":"Treat query as regex (default false)"},"extensions":{"type":"string","description":"Filter by extensions (comma-separated)"}},"required":["query"]}},
       {"name":"get_document_content","description":"Read the full text content of a file by path.","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute file path"}},"required":["path"]}},
       {"name":"index_folder","description":"Add a folder to the search index. Recursively indexes all supported files.","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Absolute folder path"}},"required":["path"]}},
@@ -111,6 +112,31 @@ class MCPServer {
                 return entry
             }
             return "# Search Results for: \(query)\nFound \(results.count) result(s)\n\n" + structured.joined(separator: "\n\n---\n\n")
+
+        case "search_memos":
+            let query = arguments["query"] as? String ?? ""
+            let limit = arguments["limit"] as? Int ?? 10
+            let includeContent = arguments["include_content"] as? Bool ?? false
+            let maxContentLength = arguments["max_content_length"] as? Int ?? 4000
+            let results = await MemosSearchService.shared.search(query: query, limit: limit)
+            if results.isEmpty { return "No Memos results found for: \(query)" }
+            let lines = results.enumerated().map { idx, r -> String in
+                var entry = """
+                ## Result \(idx + 1): \(r.title)
+                - source: \(r.sourceName)
+                - url: \(r.url.isEmpty ? "unknown" : r.url)
+                - updated: \(r.updatedAt?.description ?? "unknown")
+
+                ### Snippet
+                \(r.snippet)
+                """
+                if includeContent {
+                    entry += "\n\n### Full Content\n\(String(r.content.prefix(maxContentLength)))"
+                    if r.content.count > maxContentLength { entry += "\n[truncated at \(maxContentLength) chars]" }
+                }
+                return entry
+            }
+            return "# Memos Search Results for: \(query)\nFound \(results.count) result(s)\n\n" + lines.joined(separator: "\n\n---\n\n")
 
         case "grep_search":
             let query = arguments["query"] as? String ?? ""

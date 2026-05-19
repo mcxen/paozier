@@ -150,6 +150,7 @@ struct ResultRow: View {
     @State private var isHovered = false
 
     private var fileIcon: String {
+        if result.isExternal { return "note.text" }
         let ext = URL(fileURLWithPath: result.filePath).pathExtension.lowercased()
         switch ext {
         case "pdf": return "doc.richtext.fill"
@@ -164,6 +165,7 @@ struct ResultRow: View {
     }
 
     private var iconColor: Color {
+        if result.isExternal { return .indigo }
         let ext = URL(fileURLWithPath: result.filePath).pathExtension.lowercased()
         switch ext {
         case "pdf": return .red
@@ -197,7 +199,7 @@ struct ResultRow: View {
                 }
 
                 HStack(spacing: 6) {
-                    Text(URL(fileURLWithPath: result.filePath).pathExtension.uppercased())
+                    Text(result.isExternal ? result.sourceName : URL(fileURLWithPath: result.filePath).pathExtension.uppercased())
                         .font(.system(size: 9, weight: .medium))
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)

@@ -68,6 +68,49 @@ struct SearchResult: Identifiable, Hashable {
     let content: String
     let fileSize: Int64
     let lastModified: Date?
+    var sourceKind: String = "local"
+    var sourceName: String = "本地"
+    var externalURL: String = ""
+    var externalID: String = ""
+
+    var isExternal: Bool {
+        sourceKind != "local"
+    }
+}
+
+struct MemosSourceConfig: Identifiable, Codable, Hashable {
+    var id: String
+    var name: String
+    var baseURL: String
+    var token: String
+    var isEnabled: Bool
+
+    init(id: String = UUID().uuidString, name: String = "", baseURL: String = "", token: String = "", isEnabled: Bool = true) {
+        self.id = id
+        self.name = name
+        self.baseURL = baseURL
+        self.token = token
+        self.isEnabled = isEnabled
+    }
+
+    func displayName(index: Int) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Memos \(index + 1)" : trimmed
+    }
+}
+
+struct ExternalSearchResult: Identifiable, Hashable {
+    let id: String
+    let externalID: String
+    let sourceID: String
+    let sourceKind: String
+    let sourceName: String
+    let title: String
+    let snippet: String
+    let content: String
+    let url: String
+    let createdAt: Date?
+    let updatedAt: Date?
 }
 
 struct GrepBatchResult {

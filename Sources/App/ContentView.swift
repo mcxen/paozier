@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var indexManager: IndexManager
+    @ObservedObject private var settings = AppSettings.shared
     @StateObject private var dataManager = DataManager.shared
     @State private var searchText = ""
     @State private var results: [SearchResult] = []
@@ -11,6 +12,7 @@ struct ContentView: View {
     @State private var selectedSearchFolderPath: String?
     @State private var usesRegex = false
     @State private var fuzzySpaces = true
+    @State private var includeMemos = true
     @State private var showSearchOptions = false
     @State private var previewMode: PreviewMode = .live
     @State private var showCompendium = false
@@ -41,6 +43,14 @@ struct ContentView: View {
             usesRegex: usesRegex,
             fuzzySpaces: fuzzySpaces
         )
+    }
+
+    private var hasEnabledMemosSources: Bool {
+        settings.memosSources.contains { source in
+            source.isEnabled &&
+            !source.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !source.token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     var body: some View {
@@ -190,7 +200,7 @@ struct ContentView: View {
                     Text(searchText.isEmpty ? L("输入关键词搜索全部文档") : L("无匹配结果"))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                    Text("SearchKit + SQLite FTS5 + grep")
+                    Text(hasEnabledMemosSources ? "SearchKit + SQLite FTS5 + grep + Memos" : "SearchKit + SQLite FTS5 + grep")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }
@@ -200,8 +210,12 @@ struct ContentView: View {
                     ResultRow(result: result, isSelected: selectedResult == result)
                         .tag(result)
                         .contextMenu {
-                            Button(L("打开文件")) { NSWorkspace.shared.open(URL(fileURLWithPath: result.filePath)) }
-                            Button(L("在 Finder 中显示")) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: result.filePath)]) }
+                            if result.isExternal {
+                                Button(L("打开链接")) { openResult(result) }
+                            } else {
+                                Button(L("打开文件")) { openResult(result) }
+                                Button(L("在 Finder 中显示")) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: result.filePath)]) }
+                            }
                         }
                 }
                 .listStyle(.plain)
@@ -254,8 +268,12 @@ struct ContentView: View {
                             Button(L("导出高亮文档")) { dataManager.exportHighlighted(result: result, terms: searchTerms) }
                             Button(L("收藏搜索")) { dataManager.addBookmark(name: searchText, query: searchText) }
                             Divider()
-                            Button(L("打开文件")) { NSWorkspace.shared.open(URL(fileURLWithPath: result.filePath)) }
-                            Button(L("在 Finder 中显示")) { NSWorkspace.shared.selectFile(result.filePath, inFileViewerRootedAtPath: "") }
+                            if result.isExternal {
+                                Button(L("打开链接")) { openResult(result) }
+                            } else {
+                                Button(L("打开文件")) { openResult(result) }
+                                Button(L("在 Finder 中显示")) { NSWorkspace.shared.selectFile(result.filePath, inFileViewerRootedAtPath: "") }
+                            }
                         } label: {
                             Image(systemName: "ellipsis.circle")
                                 .font(.system(size: 14))
@@ -273,6 +291,14 @@ struct ContentView: View {
                     // Preview content with crossfade
                     Group {
                         if previewMode == .live {
+                            LivePreviewView(
+                                result: result,
+                                searchOptions: currentSearchOptions,
+                                primaryNavigationStep: primaryMatchStep,
+                                secondaryQuery: previewFindText,
+                                secondaryNavigationStep: previewFindStep
+                            )
+                        } else if result.isExternal {
                             LivePreviewView(
                                 result: result,
                                 searchOptions: currentSearchOptions,
@@ -569,6 +595,12 @@ struct ContentView: View {
                 Toggle(L("空格模糊"), isOn: searchOptionBinding(\.fuzzySpaces))
                     .toggleStyle(.checkbox)
                     .font(.system(size: 11))
+                Toggle("Memos", isOn: $includeMemos)
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 11))
+                    .disabled(!hasEnabledMemosSources)
+                    .help(hasEnabledMemosSources ? "同时搜索已启用的 Memos 源" : "未配置启用的 Memos 源")
+                    .onChange(of: includeMemos) { _, _ in rerunSearchIfNeeded() }
             }
 
             HStack(spacing: 8) {
@@ -692,6 +724,17 @@ struct ContentView: View {
                         }
                     }
                 }
+
+                if includeMemos && !options.usesRegex {
+                    group.addTask {
+                        let memosResults = await MemosSearchService.shared.search(query: options.trimmedQuery, limit: 20)
+                        let items = memosResults.map(Self.memosSearchResult)
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            appendSearchResults(items)
+                        }
+                    }
+                }
             }
 
             guard !Task.isCancelled else { return }
@@ -727,6 +770,33 @@ struct ContentView: View {
             if didChange, selectedResult == nil {
                 selectedResult = results.first
             }
+        }
+    }
+
+    nonisolated private static func memosSearchResult(_ result: ExternalSearchResult) -> SearchResult {
+        SearchResult(
+            id: result.id,
+            filePath: result.url.isEmpty ? "memos://\(result.sourceID)/\(result.externalID)" : result.url,
+            fileName: result.title,
+            title: result.title,
+            author: result.sourceName,
+            snippet: result.snippet,
+            content: result.content,
+            fileSize: 0,
+            lastModified: result.updatedAt,
+            sourceKind: result.sourceKind,
+            sourceName: result.sourceName,
+            externalURL: result.url,
+            externalID: result.externalID
+        )
+    }
+
+    private func openResult(_ result: SearchResult) {
+        if result.isExternal {
+            guard let url = URL(string: result.externalURL.isEmpty ? result.filePath : result.externalURL) else { return }
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.open(URL(fileURLWithPath: result.filePath))
         }
     }
 }
