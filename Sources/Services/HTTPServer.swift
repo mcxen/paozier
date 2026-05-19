@@ -52,6 +52,10 @@ class HTTPServer {
             return Self.response(status: 200, body: Self.searchPage, contentType: "text/html; charset=utf-8")
         }
 
+        if method == "GET" && path == "/assets/marked.umd.js" {
+            return Self.response(status: 200, body: Self.markedScript, contentType: "application/javascript; charset=utf-8")
+        }
+
         if method == "GET" && path.hasPrefix("/api/search") {
             let query = Self.queryParam(from: path, key: "q") ?? ""
             if query.isEmpty {
@@ -254,6 +258,25 @@ class HTTPServer {
         return nil
     }
 
+    private static let markedScript: String = {
+        let candidates = [
+            Bundle.main.url(forResource: "marked.umd", withExtension: "js"),
+            Bundle.main.resourceURL?.appendingPathComponent("Paozier_Paozier.bundle/Contents/Resources/marked.umd.js"),
+            Bundle.main.resourceURL?.appendingPathComponent("Paozier_Paozier.bundle/marked.umd.js"),
+            Bundle.main.resourceURL?.appendingPathComponent("marked.umd.js")
+        ].compactMap { $0 }
+
+        for url in candidates {
+            if let script = try? String(contentsOf: url, encoding: .utf8), !script.isEmpty {
+                return script
+            }
+        }
+
+        return """
+        window.marked={parse:function(input){return String(input||'').replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}).replace(/^###### (.*)$/gm,'<h6>$1</h6>').replace(/^##### (.*)$/gm,'<h5>$1</h5>').replace(/^#### (.*)$/gm,'<h4>$1</h4>').replace(/^### (.*)$/gm,'<h3>$1</h3>').replace(/^## (.*)$/gm,'<h2>$1</h2>').replace(/^# (.*)$/gm,'<h1>$1</h1>').replace(/\\n/g,'<br>');}};
+        """
+    }()
+
     private static let searchPage = """
     <!DOCTYPE html>
     <html lang="zh-CN">
@@ -286,7 +309,20 @@ class HTTPServer {
     .preview-header span{flex:1;font-size:.8rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .preview-close{background:none;border:none;cursor:pointer;color:var(--muted);font-size:1.1rem;min-height:auto;min-width:auto;padding:2px 6px}
     .preview-meta{flex:0 0 auto;padding:.45rem .85rem;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:.72rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .preview-body{flex:1 1 auto;min-height:0;overflow:auto;padding:1rem;font-family:'SF Mono',Menlo,monospace;font-size:.8rem;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text);line-height:1.65}
+    .preview-body{flex:1 1 auto;min-height:0;overflow:auto;padding:1rem;color:var(--text);line-height:1.65;overflow-wrap:anywhere}
+    .preview-body.plain{font-family:'SF Mono',Menlo,monospace;font-size:.8rem;white-space:pre-wrap}
+    .preview-body.markdown{font-size:.9rem;white-space:normal}
+    .preview-body.markdown>*+*{margin-top:.72rem}
+    .preview-body.markdown h1,.preview-body.markdown h2,.preview-body.markdown h3{line-height:1.25;margin-top:1rem;margin-bottom:.45rem}
+    .preview-body.markdown h1{font-size:1.55rem}.preview-body.markdown h2{font-size:1.25rem;border-bottom:1px solid var(--border);padding-bottom:.28rem}.preview-body.markdown h3{font-size:1.08rem}
+    .preview-body.markdown p,.preview-body.markdown li{line-height:1.75}
+    .preview-body.markdown ul,.preview-body.markdown ol{padding-left:1.45rem}
+    .preview-body.markdown blockquote{border-left:3px solid var(--accent);padding:.15rem .8rem;color:var(--muted);background:var(--surface-2)}
+    .preview-body.markdown code{font-family:'SF Mono',Menlo,monospace;font-size:.86em;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:.08rem .28rem}
+    .preview-body.markdown pre{font-family:'SF Mono',Menlo,monospace;font-size:.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:.55rem;padding:.85rem;overflow:auto;white-space:pre}
+    .preview-body.markdown pre code{background:none;border:none;padding:0}
+    .preview-body.markdown table{border-collapse:collapse;width:100%;display:block;overflow:auto}.preview-body.markdown th,.preview-body.markdown td{border:1px solid var(--border);padding:.38rem .5rem}.preview-body.markdown th{background:var(--surface-2)}
+    .preview-body.markdown a{color:var(--accent)}.preview-body.markdown img{max-width:100%;height:auto;border-radius:.45rem}
     mark{background:var(--mark);color:var(--mark-text);border-radius:4px;padding:0 .12em}
     mark.current{outline:2px solid var(--accent);outline-offset:1px}
     .count{font-size:.78rem;color:var(--muted);margin-bottom:.45rem;opacity:0;transition:opacity .3s}
@@ -329,10 +365,11 @@ class HTTPServer {
       <div id="preview" class="preview-pane">
         <div class="preview-header"><span id="pname"></span><button class="preview-close" onclick="closePreview()">✕</button></div>
         <div class="preview-meta" id="pmeta"></div>
-        <pre class="preview-body" id="pbody"></pre>
+        <div class="preview-body plain" id="pbody"></div>
       </div>
     </div>
     <div class="footer"><div class="dot"></div><span id="status">加载中...</span></div>
+    <script src="/assets/marked.umd.js"></script>
     <script>
     const q=document.getElementById('q'),res=document.getElementById('results'),cnt=document.getElementById('count'),st=document.getElementById('status');
     const includeMemos=document.getElementById('includeMemos'),externalStatus=document.getElementById('externalStatus');
@@ -385,7 +422,7 @@ class HTTPServer {
         const response=await fetch('/api/content?path='+encodeURIComponent(path));
         const t=await response.text();
         if(!response.ok){throw new Error(t||'Preview unavailable')}
-        renderPreview(t,searchTerms(q.value));
+        renderPreview(t,searchTerms(q.value),ext);
       }
       catch(e){pbody.textContent='无法加载文件内容';}
     }
@@ -398,15 +435,71 @@ class HTTPServer {
         const item=await response.json();
         if(!response.ok){throw new Error('External content unavailable')}
         pmeta.textContent=item.sourceName+(item.url?' · '+item.url:'');
-        renderPreview(item.content||item.snippet||'',searchTerms(q.value));
+        renderPreview(item.content||item.snippet||'',searchTerms(q.value),'markdown');
       }catch(e){pbody.textContent='无法加载 Memos 内容';}
     }
     function closePreview(){preview.classList.remove('open');pmeta.textContent='';pbody.textContent='';if(activeResult!==null){const el=document.getElementById(activeResult);if(el)el.classList.remove('active');activeResult=null;}}
-    function renderPreview(text,terms){
-      pbody.innerHTML=highlightText(text,terms);
+    function renderPreview(text,terms,ext){
+      pbody.className='preview-body '+(isMarkdownExt(ext)?'markdown':'plain');
+      if(isMarkdownExt(ext)){renderMarkdownPreview(text,terms);}
+      else{pbody.innerHTML=highlightText(text,terms);}
       const first=pbody.querySelector('mark');
       if(first){first.classList.add('current');requestAnimationFrame(()=>first.scrollIntoView({block:'center'}));}
       else{pbody.scrollTop=0;}
+    }
+    function isMarkdownExt(ext){return ['md','markdown'].includes((ext||'').toLowerCase())}
+    function renderMarkdownPreview(text,terms){
+      const parser=window.marked&&(window.marked.parse?window.marked:(window.marked.marked||null));
+      let html='';
+      try{
+        if(parser&&parser.setOptions)parser.setOptions({gfm:true,breaks:true,mangle:false,headerIds:false});
+        html=parser&&parser.parse?parser.parse(text||''):fallbackMarkdown(text||'');
+      }catch(e){html=fallbackMarkdown(text||'');}
+      pbody.innerHTML=sanitizeHTML(html);
+      pbody.querySelectorAll('a').forEach(a=>{a.target='_blank';a.rel='noopener noreferrer';});
+      highlightElement(pbody,terms);
+    }
+    function sanitizeHTML(html){
+      const template=document.createElement('template');
+      template.innerHTML=html||'';
+      template.content.querySelectorAll('script,iframe,object,embed,style').forEach(n=>n.remove());
+      template.content.querySelectorAll('*').forEach(el=>{
+        [...el.attributes].forEach(attr=>{
+          const name=attr.name.toLowerCase();
+          const value=attr.value.trim().toLowerCase();
+          if(name.startsWith('on')||((name==='href'||name==='src')&&(value.startsWith('javascript:')||value.startsWith('data:text/html')))){el.removeAttribute(attr.name);}
+        });
+      });
+      return template.innerHTML;
+    }
+    function highlightElement(root,terms){
+      if(!terms.length)return;
+      const regex=new RegExp(terms.map(escapeRegExp).join('|'),'gi');
+      const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{
+        acceptNode(node){
+          const parent=node.parentElement;
+          if(!parent||['SCRIPT','STYLE'].includes(parent.tagName))return NodeFilter.FILTER_REJECT;
+          regex.lastIndex=0;
+          return regex.test(node.nodeValue||'')?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT;
+        }
+      });
+      const nodes=[];
+      while(walker.nextNode())nodes.push(walker.currentNode);
+      nodes.forEach(node=>{
+        regex.lastIndex=0;
+        const frag=document.createDocumentFragment();
+        let last=0;
+        for(const match of (node.nodeValue||'').matchAll(regex)){
+          frag.append(document.createTextNode(node.nodeValue.slice(last,match.index)));
+          const mark=document.createElement('mark');mark.textContent=match[0];frag.append(mark);
+          last=match.index+match[0].length;
+        }
+        frag.append(document.createTextNode(node.nodeValue.slice(last)));
+        node.parentNode.replaceChild(frag,node);
+      });
+    }
+    function fallbackMarkdown(text){
+      return esc(text).replace(/^###### (.*)$/gm,'<h6>$1</h6>').replace(/^##### (.*)$/gm,'<h5>$1</h5>').replace(/^#### (.*)$/gm,'<h4>$1</h4>').replace(/^### (.*)$/gm,'<h3>$1</h3>').replace(/^## (.*)$/gm,'<h2>$1</h2>').replace(/^# (.*)$/gm,'<h1>$1</h1>').replace(/\\n\\n+/g,'</p><p>').replace(/\\n/g,'<br>').replace(/^/,'<p>').replace(/$/,'</p>');
     }
     function searchTerms(text){
       return [...new Set((text||'').trim().split(/\\s+/).map(t=>t.trim()).filter(t=>t.length>0 && t.length<80))].slice(0,12);
@@ -427,7 +520,7 @@ class HTTPServer {
     function escapeRegExp(s){
       return [...s].map(ch=>'.*+?^${}()|[]'.includes(ch)||ch.charCodeAt(0)===92?'\\\\'+ch:ch).join('');
     }
-    function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;'):''}
+    function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
     function escAttr(s){
       return esc(s||'').replace(/"/g,'&quot;').replace(/\\\\/g,'\\\\\\\\').replace(/'/g,"\\\\'");
     }

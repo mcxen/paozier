@@ -72,6 +72,8 @@ struct SearchResult: Identifiable, Hashable {
     var sourceName: String = "本地"
     var externalURL: String = ""
     var externalID: String = ""
+    var matchedPageIndex: Int? = nil
+    var isFilenameMatch: Bool = false
 
     var isExternal: Bool {
         sourceKind != "local"

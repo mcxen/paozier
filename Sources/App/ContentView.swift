@@ -411,6 +411,7 @@ struct ContentView: View {
                             PDFPreviewView(
                                 filePath: result.filePath,
                                 searchTerms: searchTerms,
+                                targetPageIndex: result.matchedPageIndex,
                                 primaryNavigationStep: primaryMatchStep,
                                 secondarySearchTerms: previewFindTerms,
                                 secondaryNavigationStep: previewFindStep

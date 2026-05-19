@@ -193,6 +193,7 @@ actor SearchEngine {
         let sorted = filtered.values.sorted { $0.score > $1.score }.prefix(effectiveLimit)
 
         // Filename matching: add results where filename matches but content didn't
+        var filenameMatchedPaths: Set<String> = []
         var filenameMatches: [(score: Double, url: URL)] = []
         if _searchFilenames {
             let terms = options.highlightTerms.map { $0.lowercased() }
@@ -203,6 +204,7 @@ actor SearchEngine {
                 guard fileAllowed(url, extensions: allowedExtensions, folderPaths: options.folderPaths) else { continue }
                 let name = url.lastPathComponent.lowercased()
                 if terms.contains(where: { name.contains($0) }) {
+                    filenameMatchedPaths.insert(path)
                     filenameMatches.append((score: 0.3, url: url))
                 }
             }
@@ -218,9 +220,12 @@ actor SearchEngine {
         return combined.prefix(effectiveLimit).map { item in
             let path = item.url.path
             let fileName = item.url.lastPathComponent
-            let content = Self.normalizeForSearch((try? extractText(from: item.url, allowOCRGeneration: false)) ?? "")
+            let rawContent = searchResultContent(for: item.url, options: options)
+            let matchedPageIndex = item.url.pathExtension.lowercased() == "pdf" ? firstMatchedPDFPageIndex(in: rawContent, options: options) : nil
+            let content = Self.stripPDFPageMarkers(from: rawContent)
+            let isFilenameMatch = filenameMatchedPaths.contains(path)
             let snippet: String
-            if item.score <= 0.3 && _searchFilenames {
+            if isFilenameMatch {
                 snippet = LF("文件名匹配: %@", fileName)
             } else {
                 snippet = extractSnippet(path: path, options: options)
@@ -234,7 +239,9 @@ actor SearchEngine {
                 snippet: snippet,
                 content: content,
                 fileSize: fileSize(at: path),
-                lastModified: nil
+                lastModified: nil,
+                matchedPageIndex: matchedPageIndex,
+                isFilenameMatch: isFilenameMatch
             )
         }
     }
@@ -261,10 +268,11 @@ actor SearchEngine {
         var matches: [SearchResult] = []
         for url in allIndexedURLs() {
             guard fileAllowed(url, extensions: options.allowedExtensions, folderPaths: options.folderPaths) else { continue }
-            let content = Self.normalizeForSearch((try? extractText(from: url)) ?? "")
+            let content = searchResultContent(for: url, options: options)
             let searchable = _searchFilenames ? "\(url.lastPathComponent)\n\(content)" : content
             let range = NSRange(searchable.startIndex..<searchable.endIndex, in: searchable)
             guard let match = regex.firstMatch(in: searchable, range: range) else { continue }
+            let matchedPageIndex = url.pathExtension.lowercased() == "pdf" ? pageIndex(before: match.range.location, in: searchable) : nil
 
             matches.append(SearchResult(
                 id: url.path,
@@ -273,13 +281,46 @@ actor SearchEngine {
                 title: url.lastPathComponent,
                 author: "",
                 snippet: snippet(in: searchable, around: match.range),
-                content: content,
+                content: Self.stripPDFPageMarkers(from: content),
                 fileSize: fileSize(at: url.path),
-                lastModified: nil
+                lastModified: nil,
+                matchedPageIndex: matchedPageIndex
             ))
             if matches.count >= effectiveLimit { break }
         }
         return matches
+    }
+
+    private func firstMatchedPDFPageIndex(in content: String, options: SearchOptions) -> Int? {
+        guard !content.isEmpty else { return nil }
+        if options.usesRegex,
+           let regex = try? NSRegularExpression(pattern: options.trimmedQuery, options: [.caseInsensitive]) {
+            let range = NSRange(content.startIndex..<content.endIndex, in: content)
+            guard let match = regex.firstMatch(in: content, range: range) else { return nil }
+            return pageIndex(before: match.range.location, in: content)
+        }
+
+        let lower = content.lowercased()
+        let ranges = options.highlightTerms
+            .map { Self.normalizeForSearch($0).lowercased() }
+            .filter { !$0.isEmpty }
+            .compactMap { lower.range(of: $0) }
+        guard let first = ranges.min(by: { $0.lowerBound < $1.lowerBound }) else { return nil }
+        return pageIndex(before: NSRange(first, in: content).location, in: content)
+    }
+
+    private func searchResultContent(for url: URL, options: SearchOptions) -> String {
+        Self.normalizeForSearch((try? extractText(from: url, allowOCRGeneration: false)) ?? "")
+    }
+
+    private func pageIndex(before location: Int, in content: String) -> Int? {
+        let nsContent = content as NSString
+        let prefix = nsContent.substring(to: min(location, nsContent.length))
+        let matches = Self.pdfPageMarkerRegex.matches(in: prefix, range: NSRange(prefix.startIndex..<prefix.endIndex, in: prefix))
+        guard let last = matches.last,
+              let pageRange = Range(last.range(at: 1), in: prefix),
+              let pageIndex = Int(prefix[pageRange]) else { return nil }
+        return pageIndex
     }
 
     private func fuzzyContentMatches(options: SearchOptions, excluding existing: Set<String>, limit: Int) -> [(score: Double, url: URL)] {
@@ -416,6 +457,7 @@ actor SearchEngine {
         var text = ""
         for i in 0..<doc.pageCount {
             guard let page = doc.page(at: i) else { continue }
+            text += "\n\(Self.pdfPageMarker(for: i))\n"
             let pageText = page.string ?? ""
             if Self.isUsablePDFText(pageText) {
                 text += pageText + "\n"
@@ -593,11 +635,11 @@ actor SearchEngine {
 
     private func snippet(in content: String, around nsRange: NSRange) -> String {
         guard let range = Range(nsRange, in: content) else {
-            return String(content.prefix(200)).replacingOccurrences(of: "\n", with: " ")
+            return Self.stripPDFPageMarkers(from: String(content.prefix(200))).replacingOccurrences(of: "\n", with: " ")
         }
         let start = content.index(range.lowerBound, offsetBy: -60, limitedBy: content.startIndex) ?? content.startIndex
         let end = content.index(range.upperBound, offsetBy: 140, limitedBy: content.endIndex) ?? content.endIndex
-        return String(content[start..<end]).replacingOccurrences(of: "\n", with: " ")
+        return Self.stripPDFPageMarkers(from: String(content[start..<end])).replacingOccurrences(of: "\n", with: " ")
     }
 
     private func fileSize(at path: String) -> Int64 {
@@ -649,7 +691,7 @@ actor SearchEngine {
         let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
         let modified = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
-        let fingerprint = "\(url.path)|\(modified)|\(size)|ocr:\(_enableImageOCR)|scope:\(_imageOCRScope)|v4"
+        let fingerprint = "\(url.path)|\(modified)|\(size)|ocr:\(_enableImageOCR)|scope:\(_imageOCRScope)|v5"
         let digest = SHA256.hash(data: Data(fingerprint.utf8)).map { String(format: "%02x", $0) }.joined()
         return extractedTextCacheDir.appendingPathComponent("\(digest).txt")
     }
@@ -669,6 +711,20 @@ actor SearchEngine {
     ]
 
     private static let defaultOCRLanguages = ["zh-Hans", "zh-Hant", "en-US"]
+    private static let pdfPageMarkerPrefix = "[[PAOZIER_PAGE_"
+    private static let pdfPageMarkerRegex = try! NSRegularExpression(pattern: #"\[\[PAOZIER_PAGE_(\d+)\]\]"#)
+
+    private static func pdfPageMarker(for pageIndex: Int) -> String {
+        "\(pdfPageMarkerPrefix)\(pageIndex)]]"
+    }
+
+    private static func stripPDFPageMarkers(from text: String) -> String {
+        pdfPageMarkerRegex.stringByReplacingMatches(
+            in: text,
+            range: NSRange(text.startIndex..<text.endIndex, in: text),
+            withTemplate: ""
+        )
+    }
 
     private static func removeWhitespaceBetweenCJKCharacters(in text: String) -> String {
         var output = ""

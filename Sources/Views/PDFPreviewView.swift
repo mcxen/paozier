@@ -5,6 +5,7 @@ import QuickLookUI
 struct PDFPreviewView: View {
     let filePath: String
     var searchTerms: [String] = []
+    var targetPageIndex: Int?
     var primaryNavigationStep: Int = 0
     var secondarySearchTerms: [String] = []
     var secondaryNavigationStep: Int = 0
@@ -39,6 +40,7 @@ struct PDFPreviewView: View {
             PDFKitView(
                 document: doc,
                 searchTerms: searchTerms,
+                targetPageIndex: targetPageIndex,
                 primaryNavigationStep: primaryNavigationStep,
                 secondarySearchTerms: secondarySearchTerms,
                 secondaryNavigationStep: secondaryNavigationStep
@@ -323,6 +325,7 @@ struct QuickLookPreview: NSViewRepresentable {
 struct PDFKitView: NSViewRepresentable {
     let document: PDFDocument
     var searchTerms: [String] = []
+    var targetPageIndex: Int?
     var primaryNavigationStep: Int = 0
     var secondarySearchTerms: [String] = []
     var secondaryNavigationStep: Int = 0
@@ -353,6 +356,7 @@ struct PDFKitView: NSViewRepresentable {
                 allSelections.append(sel)
             }
         }
+        primarySelections = primarySelections.sorted { selectionSortKey($0, document: doc) < selectionSortKey($1, document: doc) }
         for term in secondarySearchTerms where !term.isEmpty {
             let selections = doc.findString(term, withOptions: .caseInsensitive)
             for sel in selections {
@@ -361,6 +365,8 @@ struct PDFKitView: NSViewRepresentable {
                 allSelections.append(sel)
             }
         }
+        secondarySelections = secondarySelections.sorted { selectionSortKey($0, document: doc) < selectionSortKey($1, document: doc) }
+        allSelections = allSelections.sorted { selectionSortKey($0, document: doc) < selectionSortKey($1, document: doc) }
         if !allSelections.isEmpty {
             nsView.highlightedSelections = allSelections
         }
@@ -370,6 +376,30 @@ struct PDFKitView: NSViewRepresentable {
             let idx = ((step % targetSelections.count) + targetSelections.count) % targetSelections.count
             nsView.setCurrentSelection(targetSelections[idx], animate: true)
             nsView.scrollSelectionToVisible(nil)
+        } else if let targetPageIndex,
+                  let page = doc.page(at: max(0, min(targetPageIndex, doc.pageCount - 1))) {
+            nsView.go(to: page)
         }
+    }
+
+    private func selectionSortKey(_ selection: PDFSelection, document: PDFDocument) -> PDFSelectionSortKey {
+        guard let page = selection.pages.first else {
+            return PDFSelectionSortKey(pageIndex: Int.max, y: .greatestFiniteMagnitude, x: .greatestFiniteMagnitude)
+        }
+        let pageIndex = document.index(for: page)
+        let bounds = selection.bounds(for: page)
+        return PDFSelectionSortKey(pageIndex: pageIndex, y: -bounds.maxY, x: bounds.minX)
+    }
+}
+
+private struct PDFSelectionSortKey: Comparable {
+    let pageIndex: Int
+    let y: CGFloat
+    let x: CGFloat
+
+    static func < (lhs: PDFSelectionSortKey, rhs: PDFSelectionSortKey) -> Bool {
+        if lhs.pageIndex != rhs.pageIndex { return lhs.pageIndex < rhs.pageIndex }
+        if lhs.y != rhs.y { return lhs.y < rhs.y }
+        return lhs.x < rhs.x
     }
 }
