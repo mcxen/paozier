@@ -97,7 +97,7 @@ actor SearchEngine {
         for q in ["\u{201C}", "\u{201D}", "\u{201E}", "\u{00AB}", "\u{00BB}"] {
             result = result.replacingOccurrences(of: q, with: "\"")
         }
-        return result
+        return removeWhitespaceBetweenCJKCharacters(in: result)
     }
 
     func commit() {
@@ -209,7 +209,7 @@ actor SearchEngine {
         }
         var combined = Array(sorted) + filenameMatches.prefix(effectiveLimit / 3)
 
-        if options.fuzzySpaces, options.highlightTerms.count > 1 {
+        if options.fuzzySpaces, !options.highlightTerms.isEmpty {
             let existing = Set(combined.map { $0.url.path })
             let fuzzyMatches = fuzzyContentMatches(options: options, excluding: existing, limit: max(effectiveLimit / 2, 10))
             combined += fuzzyMatches
@@ -283,14 +283,16 @@ actor SearchEngine {
     }
 
     private func fuzzyContentMatches(options: SearchOptions, excluding existing: Set<String>, limit: Int) -> [(score: Double, url: URL)] {
-        let terms = options.highlightTerms.map { $0.lowercased() }
-        guard terms.count > 1 else { return [] }
+        let terms = options.highlightTerms
+            .map { Self.normalizeForSearch($0).lowercased() }
+            .filter { !$0.isEmpty }
+        guard !terms.isEmpty else { return [] }
 
         var matches: [(score: Double, url: URL)] = []
         for url in allIndexedURLs() {
             if existing.contains(url.path) { continue }
             guard fileAllowed(url, extensions: options.allowedExtensions, folderPaths: options.folderPaths) else { continue }
-            let content = ((try? extractText(from: url, allowOCRGeneration: false)) ?? "").lowercased()
+            let content = Self.normalizeForSearch((try? extractText(from: url, allowOCRGeneration: false)) ?? "").lowercased()
             guard containsTermsInOrder(terms, in: content) else { continue }
             matches.append((score: 0.25, url: url))
             if matches.count >= limit { break }
@@ -361,7 +363,7 @@ actor SearchEngine {
         let ext = url.pathExtension.lowercased()
         switch ext {
         case "pdf":
-            return extractPDFText(from: url)
+            return extractPDFText(from: url, allowOCRGeneration: allowOCRGeneration)
         case "md", "markdown":
             return try extractMarkdownText(from: url, allowOCRGeneration: allowOCRGeneration)
         case "docx":
@@ -409,20 +411,33 @@ actor SearchEngine {
         return markdown + "\n\n" + ocrBlocks.joined(separator: "\n\n")
     }
 
-    private func extractPDFText(from url: URL) -> String {
+    private func extractPDFText(from url: URL, allowOCRGeneration: Bool) -> String {
         guard let doc = PDFDocument(url: url) else { return "" }
         var text = ""
         for i in 0..<doc.pageCount {
             guard let page = doc.page(at: i) else { continue }
             let pageText = page.string ?? ""
-            if !pageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if Self.isUsablePDFText(pageText) {
                 text += pageText + "\n"
             } else {
+                guard allowOCRGeneration else { continue }
                 // OCR fallback for image-based pages
                 text += ocrPage(page) + "\n"
             }
         }
         return text
+    }
+
+    private static func isUsablePDFText(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let meaningful = trimmed.unicodeScalars.filter { scalar in
+            CharacterSet.letters.contains(scalar) ||
+            CharacterSet.decimalDigits.contains(scalar) ||
+            isCJKScalar(scalar)
+        }.count
+        guard meaningful >= 8 else { return false }
+        return Double(meaningful) / Double(max(trimmed.unicodeScalars.count, 1)) >= 0.25
     }
 
     private func ocrPage(_ page: PDFPage) -> String {
@@ -563,12 +578,7 @@ actor SearchEngine {
 
     private func extractSnippet(path: String, options: SearchOptions) -> String {
         let url = URL(fileURLWithPath: path)
-        let content: String
-        if url.pathExtension.lowercased() == "pdf" {
-            content = extractPDFText(from: url)
-        } else {
-            content = (try? extractText(from: url, allowOCRGeneration: false)) ?? ""
-        }
+        let content = (try? extractText(from: url, allowOCRGeneration: false)) ?? ""
         guard !content.isEmpty else { return "" }
 
         let lower = content.lowercased()
@@ -639,7 +649,7 @@ actor SearchEngine {
         let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
         let modified = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
-        let fingerprint = "\(url.path)|\(modified)|\(size)|ocr:\(_enableImageOCR)|scope:\(_imageOCRScope)|v3"
+        let fingerprint = "\(url.path)|\(modified)|\(size)|ocr:\(_enableImageOCR)|scope:\(_imageOCRScope)|v4"
         let digest = SHA256.hash(data: Data(fingerprint.utf8)).map { String(format: "%02x", $0) }.joined()
         return extractedTextCacheDir.appendingPathComponent("\(digest).txt")
     }
@@ -659,6 +669,43 @@ actor SearchEngine {
     ]
 
     private static let defaultOCRLanguages = ["zh-Hans", "zh-Hant", "en-US"]
+
+    private static func removeWhitespaceBetweenCJKCharacters(in text: String) -> String {
+        var output = ""
+        var pendingWhitespace = ""
+        var previousWasCJK = false
+
+        for scalar in text.unicodeScalars {
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                pendingWhitespace.append(String(scalar))
+                continue
+            }
+
+            let currentIsCJK = isCJKScalar(scalar)
+            if !pendingWhitespace.isEmpty {
+                if !(previousWasCJK && currentIsCJK) {
+                    output += pendingWhitespace
+                }
+                pendingWhitespace.removeAll(keepingCapacity: true)
+            }
+            output.append(String(scalar))
+            previousWasCJK = currentIsCJK
+        }
+
+        output += pendingWhitespace
+        return output
+    }
+
+    private static func isCJKScalar(_ scalar: UnicodeScalar) -> Bool {
+        switch scalar.value {
+        case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF,
+             0x20000...0x2A6DF, 0x2A700...0x2B73F, 0x2B740...0x2B81F,
+             0x2B820...0x2CEAF, 0x30000...0x3134F:
+            return true
+        default:
+            return false
+        }
+    }
 
     static func markdownImageURLs(in markdown: String, markdownURL: URL) -> [URL] {
         let pattern = #"!\[[^\]]*\]\(([^)\n]+)\)"#
