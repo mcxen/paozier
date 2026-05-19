@@ -10,6 +10,7 @@ struct PaozierApp: App {
         // Defer hotkey registration until after run loop is established
         DispatchQueue.main.async {
             GlobalSearchPopupController.shared.registerHotkey()
+            QuickSearchStatusItemController.shared.sync()
         }
     }
 

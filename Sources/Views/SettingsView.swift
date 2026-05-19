@@ -37,6 +37,11 @@ struct SettingsView: View {
     @State private var memosValidationMessages: [String: String] = [:]
 
     var body: some View {
+        settingsContent
+            .modifier(SettingsPersistenceModifier(settings: settings))
+    }
+
+    private var settingsContent: some View {
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: "gearshape.fill").foregroundStyle(.blue)
@@ -59,22 +64,6 @@ struct SettingsView: View {
             .padding(16)
         }
         .frame(width: 620, height: 540)
-        .onChange(of: settings.searchResultLimit) { _, _ in settings.save() }
-        .onChange(of: settings.searchEngineWeightSK) { _, _ in settings.save() }
-        .onChange(of: settings.searchEngineWeightFTS) { _, _ in settings.save() }
-        .onChange(of: settings.httpPort) { _, _ in settings.save() }
-        .onChange(of: settings.httpAutoStart) { _, _ in settings.save() }
-        .onChange(of: settings.mcpPort) { _, _ in settings.save() }
-        .onChange(of: settings.mcpAutoStart) { _, _ in settings.save() }
-        .onChange(of: settings.defaultPreviewMode) { _, _ in settings.save() }
-        .onChange(of: settings.historyMaxItems) { _, _ in settings.save() }
-        .onChange(of: settings.excludedExtensions) { _, _ in settings.save() }
-        .onChange(of: settings.searchFilenames) { _, _ in settings.save() }
-        .onChange(of: settings.languagePreference) { _, _ in settings.save() }
-        .onChange(of: settings.matchContextChars) { _, _ in settings.save() }
-        .onChange(of: settings.enableImageOCR) { _, _ in settings.save() }
-        .onChange(of: settings.imageOCRScope) { _, _ in settings.save() }
-        .onChange(of: settings.memosSources) { _, _ in settings.save() }
     }
 
     // MARK: - General
@@ -93,6 +82,13 @@ struct SettingsView: View {
                     Text("Live Preview").tag("live")
                     Text(L("原文件")).tag("pdf")
                 }
+            }
+            Section(L("快速搜索")) {
+                Toggle(L("在菜单栏显示快速搜索"), isOn: $settings.quickSearchMenuBarEnabled)
+                Toggle(L("快速搜索窗口固定在最前"), isOn: $settings.quickSearchPanelAlwaysOnTop)
+                Text(L("开启菜单栏后，可从 macOS 状态栏直接打开快速搜索面板。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section(L("历史记录")) {
                 Stepper(LF("最大记录数: %d", settings.historyMaxItems), value: $settings.historyMaxItems, in: 10...1000, step: 10)
@@ -338,6 +334,27 @@ struct SettingsView: View {
         case "index": Task { await IndexManager.shared?.reindexAll() }
         default: break
         }
+    }
+}
+
+private struct SettingsPersistenceModifier: ViewModifier {
+    @ObservedObject var settings: AppSettings
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(settings.objectWillChange) { _ in
+                Task { @MainActor in
+                    await Task.yield()
+                    settings.save()
+                    QuickSearchStatusItemController.shared.sync()
+                    QuickSearchPanelController.shared.applySettings()
+                }
+            }
+            .onDisappear {
+                settings.save()
+                QuickSearchStatusItemController.shared.sync()
+                QuickSearchPanelController.shared.applySettings()
+            }
     }
 }
 

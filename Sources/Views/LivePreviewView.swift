@@ -12,6 +12,7 @@ struct LivePreviewView: View {
     @State private var copied = false
 
     private var isMarkdown: Bool {
+        if result.sourceKind == "memos" { return true }
         let ext = URL(fileURLWithPath: result.filePath).pathExtension.lowercased()
         return ext == "md" || ext == "markdown"
     }
@@ -125,7 +126,7 @@ struct LivePreviewView: View {
             if isMarkdown {
                 MarkdownWebPreview(
                     markdown: previewContent,
-                    baseURL: URL(fileURLWithPath: result.filePath).deletingLastPathComponent(),
+                    baseURL: markdownBaseURL,
                     primaryTerms: searchOptions.usesRegex ? [] : searchOptions.highlightTerms,
                     primaryNavigationStep: primaryNavigationStep,
                     secondaryTerms: secondaryTerms,
@@ -166,6 +167,13 @@ struct LivePreviewView: View {
             .split(whereSeparator: \.isWhitespace)
             .map(String.init)
             .filter { !$0.isEmpty }
+    }
+
+    private var markdownBaseURL: URL {
+        if result.isExternal, let url = URL(string: result.externalURL.isEmpty ? result.filePath : result.externalURL) {
+            return url.deletingLastPathComponent()
+        }
+        return URL(fileURLWithPath: result.filePath).deletingLastPathComponent()
     }
 
     private func scrollTo(_ proxy: ScrollViewProxy, ids: [Int], step: Int) {

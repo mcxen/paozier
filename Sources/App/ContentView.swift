@@ -9,7 +9,7 @@ struct ContentView: View {
     @State private var selectedResult: SearchResult?
     @State private var isSearching = false
     @State private var selectedFileTypes: Set<FileTypeFilter> = []
-    @State private var selectedSearchFolderPath: String?
+    @State private var selectedSearchFolderPaths: Set<String> = []
     @State private var usesRegex = false
     @State private var fuzzySpaces = true
     @State private var includeMemos = true
@@ -39,7 +39,7 @@ struct ContentView: View {
         SearchOptions(
             query: searchText,
             selectedFileTypes: selectedFileTypes,
-            folderPaths: selectedSearchFolderPath.map { Set([$0]) } ?? [],
+            folderPaths: selectedSearchFolderPaths,
             usesRegex: usesRegex,
             fuzzySpaces: fuzzySpaces
         )
@@ -97,8 +97,10 @@ struct ContentView: View {
             documentMatchJumpCycle = 0
         }
         .onChange(of: indexManager.indexedFolders.map(\.path)) { _, paths in
-            if let selectedSearchFolderPath, !paths.contains(selectedSearchFolderPath) {
-                self.selectedSearchFolderPath = nil
+            let validPaths = Set(paths)
+            let newSelection = selectedSearchFolderPaths.intersection(validPaths)
+            if newSelection != selectedSearchFolderPaths {
+                selectedSearchFolderPaths = newSelection
                 rerunSearchIfNeeded()
             }
         }
@@ -562,7 +564,7 @@ struct ContentView: View {
     }
 
     private var hasActiveSearchOptions: Bool {
-        !selectedFileTypes.isEmpty || selectedSearchFolderPath != nil || usesRegex || !fuzzySpaces
+        !selectedFileTypes.isEmpty || !selectedSearchFolderPaths.isEmpty || usesRegex || !fuzzySpaces || includeMemos
     }
 
     private var fileTypeSummary: String {
@@ -574,8 +576,11 @@ struct ContentView: View {
     }
 
     private var searchScopeSummary: String {
-        guard let selectedSearchFolderPath else { return L("全部文件夹") }
-        return URL(fileURLWithPath: selectedSearchFolderPath).lastPathComponent
+        if selectedSearchFolderPaths.isEmpty { return L("全部文件夹") }
+        if selectedSearchFolderPaths.count == 1, let path = selectedSearchFolderPaths.first {
+            return URL(fileURLWithPath: path).lastPathComponent
+        }
+        return LF("%d 个文件夹", selectedSearchFolderPaths.count)
     }
 
     private var searchOptionsPanel: some View {
@@ -584,10 +589,12 @@ struct ContentView: View {
                 Label(L("搜索条件"), systemImage: "line.3.horizontal.decrease.circle")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: true, vertical: false)
                 Text("\(searchScopeSummary) · \(fileTypeSummary)")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
+                    .truncationMode(.middle)
                 Spacer()
                 Toggle(L("正则"), isOn: searchOptionBinding(\.usesRegex))
                     .toggleStyle(.checkbox)
@@ -607,21 +614,41 @@ struct ContentView: View {
                 Text(L("范围"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .frame(width: 32, alignment: .leading)
-                Picker("", selection: Binding(
-                    get: { selectedSearchFolderPath ?? "" },
-                    set: { newValue in
-                        selectedSearchFolderPath = newValue.isEmpty ? nil : newValue
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(width: 42, alignment: .leading)
+                Menu {
+                    Button {
+                        selectedSearchFolderPaths.removeAll()
                         rerunSearchIfNeeded()
+                    } label: {
+                        Label(L("全部已添加文件夹"), systemImage: selectedSearchFolderPaths.isEmpty ? "checkmark" : "")
                     }
-                )) {
-                    Text(L("全部已添加文件夹")).tag("")
+                    Divider()
                     ForEach(indexManager.indexedFolders) { folder in
-                        Text(URL(fileURLWithPath: folder.path).lastPathComponent).tag(folder.path)
+                        let isSelected = selectedSearchFolderPaths.contains(folder.path)
+                        Button {
+                            toggleSearchFolder(folder.path)
+                        } label: {
+                            Label(URL(fileURLWithPath: folder.path).lastPathComponent, systemImage: isSelected ? "checkmark" : "")
+                        }
                     }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(searchScopeSummary)
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.primary.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
                 }
-                .pickerStyle(.menu)
-                .controlSize(.small)
+                .buttonStyle(.plain)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -680,6 +707,15 @@ struct ContentView: View {
             } else {
                 selectedFileTypes.insert(filter)
             }
+        }
+        rerunSearchIfNeeded()
+    }
+
+    private func toggleSearchFolder(_ path: String) {
+        if selectedSearchFolderPaths.contains(path) {
+            selectedSearchFolderPaths.remove(path)
+        } else {
+            selectedSearchFolderPaths.insert(path)
         }
         rerunSearchIfNeeded()
     }

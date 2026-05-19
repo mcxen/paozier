@@ -36,6 +36,8 @@ class AppSettings: ObservableObject, Codable {
     @Published var enableImageOCR: Bool = false
     @Published var imageOCRScope: String = ImageOCRScope.markdownOnly.rawValue
     @Published var memosSources: [MemosSourceConfig] = []
+    @Published var quickSearchMenuBarEnabled: Bool = false
+    @Published var quickSearchPanelAlwaysOnTop: Bool = true
 
     private static var filePath: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -48,6 +50,7 @@ class AppSettings: ObservableObject, Codable {
         case searchResultLimit, searchEngineWeightSK, searchEngineWeightFTS
         case httpPort, httpAutoStart, mcpPort, mcpAutoStart
         case defaultPreviewMode, historyMaxItems, excludedExtensions, searchFilenames, languagePreference, matchContextChars, enableImageOCR, imageOCRScope, memosSources
+        case quickSearchMenuBarEnabled, quickSearchPanelAlwaysOnTop
     }
 
     init() { load() }
@@ -70,6 +73,8 @@ class AppSettings: ObservableObject, Codable {
         enableImageOCR = (try? c.decode(Bool.self, forKey: .enableImageOCR)) ?? false
         imageOCRScope = (try? c.decode(String.self, forKey: .imageOCRScope)) ?? ImageOCRScope.markdownOnly.rawValue
         memosSources = (try? c.decode([MemosSourceConfig].self, forKey: .memosSources)) ?? []
+        quickSearchMenuBarEnabled = (try? c.decode(Bool.self, forKey: .quickSearchMenuBarEnabled)) ?? false
+        quickSearchPanelAlwaysOnTop = (try? c.decode(Bool.self, forKey: .quickSearchPanelAlwaysOnTop)) ?? true
     }
 
     func encode(to encoder: Encoder) throws {
@@ -90,6 +95,8 @@ class AppSettings: ObservableObject, Codable {
         try c.encode(enableImageOCR, forKey: .enableImageOCR)
         try c.encode(imageOCRScope, forKey: .imageOCRScope)
         try c.encode(memosSources, forKey: .memosSources)
+        try c.encode(quickSearchMenuBarEnabled, forKey: .quickSearchMenuBarEnabled)
+        try c.encode(quickSearchPanelAlwaysOnTop, forKey: .quickSearchPanelAlwaysOnTop)
     }
 
     func save() {
@@ -116,6 +123,8 @@ class AppSettings: ObservableObject, Codable {
         enableImageOCR = decoded.enableImageOCR
         imageOCRScope = decoded.imageOCRScope
         memosSources = decoded.memosSources
+        quickSearchMenuBarEnabled = decoded.quickSearchMenuBarEnabled
+        quickSearchPanelAlwaysOnTop = decoded.quickSearchPanelAlwaysOnTop
         UserDefaults.standard.set(languagePreference, forKey: "languagePreference")
     }
 }

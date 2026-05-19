@@ -3,6 +3,7 @@ import AppKit
 
 // MARK: - Panel Controller
 
+@MainActor
 final class QuickSearchPanelController {
     static let shared = QuickSearchPanelController()
     private var panel: NSPanel?
@@ -25,19 +26,91 @@ final class QuickSearchPanelController {
                 defer: false
             )
             panel.title = L("快速搜索")
-            panel.isFloatingPanel = true
-            panel.level = .floating
-            panel.hidesOnDeactivate = false
             panel.isMovableByWindowBackground = true
             panel.contentView = NSHostingView(rootView: QuickSearchPanelView())
+            addPinAccessory(to: panel)
+            applySettings()
             panel.center()
             self.panel = panel
         }
+        applySettings()
         panel?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applySettings() {
+        guard let panel else { return }
+        let pinned = AppSettings.shared.quickSearchPanelAlwaysOnTop
+        panel.isFloatingPanel = pinned
+        panel.level = pinned ? .floating : .normal
+        panel.hidesOnDeactivate = !pinned
+    }
+
+    private func addPinAccessory(to panel: NSPanel) {
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.layoutAttribute = .right
+        accessory.view = NSHostingView(rootView: QuickSearchPinButton())
+        panel.addTitlebarAccessoryViewController(accessory)
+    }
+}
+
+@MainActor
+final class QuickSearchStatusItemController: NSObject {
+    static let shared = QuickSearchStatusItemController()
+    private var statusItem: NSStatusItem?
+
+    func sync() {
+        if AppSettings.shared.quickSearchMenuBarEnabled {
+            install()
+        } else {
+            remove()
+        }
+    }
+
+    private func install() {
+        guard statusItem == nil else { return }
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = item.button {
+            button.image = NSImage(systemSymbolName: "text.magnifyingglass", accessibilityDescription: L("快速搜索"))
+                ?? NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: L("快速搜索"))
+            button.imagePosition = .imageOnly
+            button.toolTip = L("打开 Paozier 快速搜索")
+            button.target = self
+            button.action = #selector(openQuickSearch)
+        }
+        statusItem = item
+    }
+
+    private func remove() {
+        guard let statusItem else { return }
+        NSStatusBar.system.removeStatusItem(statusItem)
+        self.statusItem = nil
+    }
+
+    @objc private func openQuickSearch() {
+        QuickSearchPanelController.shared.show()
     }
 }
 
 // MARK: - SwiftUI View
+
+private struct QuickSearchPinButton: View {
+    @ObservedObject private var settings = AppSettings.shared
+
+    var body: some View {
+        Button {
+            settings.quickSearchPanelAlwaysOnTop.toggle()
+            settings.save()
+            QuickSearchPanelController.shared.applySettings()
+        } label: {
+            Image(systemName: settings.quickSearchPanelAlwaysOnTop ? "pin.fill" : "pin")
+                .font(.system(size: 12, weight: .medium))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(settings.quickSearchPanelAlwaysOnTop ? Color.accentColor : .secondary)
+        .help(settings.quickSearchPanelAlwaysOnTop ? L("取消固定在最前") : L("固定在最前"))
+    }
+}
 
 struct QuickSearchPanelView: View {
     @State private var query = ""
