@@ -1,5 +1,7 @@
 # 狍子 (Paozier)
 
+<img width="128" height="128" alt="AppIcon" src="https://github.com/user-attachments/assets/9ccc3ca1-9768-4a32-a747-16a1ba1dcc3b" />
+
 > **"狍子"（páo zi）** — 森林中可爱又充满好奇心的小鹿，总能在密林深处找到它想要的东西。
 
 ---
