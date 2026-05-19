@@ -274,9 +274,10 @@ class IndexManager: ObservableObject {
     }
 
     func grepSearch(options: SearchOptions) async -> AsyncStream<GrepBatchResult> {
+        let folderPaths = options.folderPaths.isEmpty ? indexedFolders.map(\.path) : Array(options.folderPaths)
         return await GrepSearchEngine.shared.search(
             query: options.trimmedQuery,
-            folderPaths: indexedFolders.map(\.path),
+            folderPaths: folderPaths,
             allowedExtensions: options.allowedExtensions,
             isRegex: options.usesRegex
         )

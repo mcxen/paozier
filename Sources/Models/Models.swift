@@ -220,11 +220,13 @@ struct SearchHistoryItem: Identifiable, Codable {
     let query: String
     let resultCount: Int
     let date: Date
+    let duration: TimeInterval?
 
-    init(query: String, resultCount: Int) {
+    init(query: String, resultCount: Int, duration: TimeInterval? = nil) {
         self.id = UUID().uuidString
         self.query = query
         self.resultCount = resultCount
+        self.duration = duration
         self.date = Date()
     }
 }

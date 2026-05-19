@@ -42,7 +42,7 @@ struct HistoryView: View {
                                 Text(item.query)
                                     .font(.callout)
                                 HStack {
-                                    Text(LF("%d 结果", item.resultCount))
+                                    Text(historyMetaText(item))
                                     Text(item.date, style: .relative)
                                 }
                                 .font(.caption2)
@@ -82,5 +82,17 @@ struct HistoryView: View {
             }
         }
         .frame(minWidth: 400, minHeight: 300)
+    }
+
+    private func historyMetaText(_ item: SearchHistoryItem) -> String {
+        let countText = LF("%d 结果", item.resultCount)
+        guard let duration = item.duration else { return countText }
+        if duration < 1 {
+            return "\(countText) · \(String(format: "%.0fms", max(duration, 0) * 1000))"
+        }
+        if duration < 10 {
+            return "\(countText) · \(String(format: "%.1fs", duration))"
+        }
+        return "\(countText) · \(String(format: "%.0fs", duration))"
     }
 }

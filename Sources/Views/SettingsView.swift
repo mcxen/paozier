@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Darwin
 
 // MARK: - Standalone Window Controller
 
@@ -13,12 +14,13 @@ final class SettingsWindowController {
             return
         }
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0, width: 820, height: 600),
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         w.title = L("Paozier 设置")
+        w.minSize = NSSize(width: 760, height: 520)
         w.center()
         w.contentView = NSHostingView(rootView: SettingsView())
         w.isReleasedWhenClosed = false
@@ -29,12 +31,63 @@ final class SettingsWindowController {
 
 // MARK: - Settings View
 
+private enum SettingsCategory: String, CaseIterable, Identifiable {
+    case general
+    case search
+    case services
+    case external
+    case index
+    case data
+    case about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: return L("通用")
+        case .search: return L("搜索")
+        case .services: return L("服务")
+        case .external: return L("外部源")
+        case .index: return L("索引")
+        case .data: return L("数据")
+        case .about: return L("关于")
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .general: return L("语言、预览和快速搜索")
+        case .search: return L("结果数量、排序和范围")
+        case .services: return L("HTTP 与 MCP 服务")
+        case .external: return L("Memos 与外部搜索源")
+        case .index: return L("OCR 与索引排除项")
+        case .data: return L("历史、报告和本地数据")
+        case .about: return L("版本、源码和更新")
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .general: return "slider.horizontal.3"
+        case .search: return "magnifyingglass"
+        case .services: return "network"
+        case .external: return "point.3.connected.trianglepath.dotted"
+        case .index: return "tray.full"
+        case .data: return "externaldrive"
+        case .about: return "info.circle"
+        }
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject var settings = AppSettings.shared
     @State private var newExtension = ""
     @State private var showClearConfirm = false
     @State private var clearTarget = ""
     @State private var memosValidationMessages: [String: String] = [:]
+    @State private var selectedCategory: SettingsCategory = .general
+    @State private var usageSnapshot = SystemUsageSnapshot.load(dataDirectory: SettingsView.defaultDataDirectory)
+    @State private var updateState: ReleaseCheckState = .idle
 
     var body: some View {
         settingsContent
@@ -42,28 +95,77 @@ struct SettingsView: View {
     }
 
     private var settingsContent: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Image(systemName: "gearshape.fill").foregroundStyle(.blue)
-                Text(L("设置")).font(.headline)
-                Spacer()
-                Button(L("完成")) { NSApp.keyWindow?.close() }.buttonStyle(.borderedProminent).controlSize(.small)
-            }
-            .padding(12)
-            .background(.bar)
+        HStack(spacing: 0) {
+            settingsSidebar
             Divider()
-
-            TabView {
-                generalTab.tabItem { Label(L("通用"), systemImage: "slider.horizontal.3") }
-                searchTab.tabItem { Label(L("搜索"), systemImage: "magnifyingglass") }
-                servicesTab.tabItem { Label(L("服务"), systemImage: "network") }
-                externalTab.tabItem { Label(L("外部源"), systemImage: "point.3.connected.trianglepath.dotted") }
-                indexTab.tabItem { Label(L("索引"), systemImage: "tray.full") }
-                dataTab.tabItem { Label(L("数据"), systemImage: "externaldrive") }
+            VStack(spacing: 0) {
+                settingsHeader
+                Divider()
+                ScrollView {
+                    selectedCategoryView
+                        .padding(22)
+                        .frame(maxWidth: 720)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                }
             }
-            .padding(16)
         }
-        .frame(width: 620, height: 540)
+        .frame(width: 820, height: 600)
+    }
+
+    private var settingsSidebar: some View {
+        List(selection: $selectedCategory) {
+            ForEach(SettingsCategory.allCases) { category in
+                Label(category.title, systemImage: category.systemImage)
+                    .tag(category)
+            }
+        }
+        .listStyle(.sidebar)
+        .frame(width: 190)
+        .scrollContentBackground(.hidden)
+        .background(.bar)
+    }
+
+    private var settingsHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: selectedCategory.systemImage)
+                .foregroundStyle(.blue)
+                .font(.title3)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(selectedCategory.title)
+                    .font(.headline)
+                Text(selectedCategory.subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(L("完成")) { NSApp.keyWindow?.close() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private var selectedCategoryView: some View {
+        switch selectedCategory {
+        case .general:
+            generalTab
+        case .search:
+            searchTab
+        case .services:
+            servicesTab
+        case .external:
+            externalTab
+        case .index:
+            indexTab
+        case .data:
+            dataTab
+        case .about:
+            aboutTab
+        }
     }
 
     // MARK: - General
@@ -303,8 +405,40 @@ struct SettingsView: View {
                     Button(L("打开")) { NSWorkspace.shared.open(dataDirectory) }.controlSize(.small)
                 }
             }
+            Section(L("存储与内存占用")) {
+                VStack(alignment: .leading, spacing: 12) {
+                    RainbowUsageRow(
+                        title: L("应用体积"),
+                        valueText: ByteCountFormatter.paozierString(fromByteCount: usageSnapshot.appSizeBytes),
+                        detailText: usageSnapshot.appLocation,
+                        fraction: usageSnapshot.appSizeFraction
+                    )
+                    RainbowUsageRow(
+                        title: L("本地数据"),
+                        valueText: ByteCountFormatter.paozierString(fromByteCount: usageSnapshot.dataSizeBytes),
+                        detailText: "~/Library/Application Support/Paozier/",
+                        fraction: usageSnapshot.dataSizeFraction
+                    )
+                    RainbowUsageRow(
+                        title: L("当前内存"),
+                        valueText: ByteCountFormatter.paozierString(fromByteCount: usageSnapshot.memoryBytes),
+                        detailText: LF("物理内存 %@", ByteCountFormatter.paozierString(fromByteCount: usageSnapshot.physicalMemoryBytes)),
+                        fraction: usageSnapshot.memoryFraction
+                    )
+                    HStack {
+                        Spacer()
+                        Button(L("刷新")) {
+                            usageSnapshot = SystemUsageSnapshot.load(dataDirectory: dataDirectory)
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
+        .onAppear {
+            usageSnapshot = SystemUsageSnapshot.load(dataDirectory: dataDirectory)
+        }
         .alert(L("确认操作"), isPresented: $showClearConfirm) {
             Button(L("取消"), role: .cancel) {}
             Button(L("确认"), role: .destructive) { performClear() }
@@ -313,9 +447,173 @@ struct SettingsView: View {
         }
     }
 
-    private var dataDirectory: URL {
+    // MARK: - About
+
+    private var aboutTab: some View {
+        Form {
+            Section {
+                HStack(spacing: 12) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .frame(width: 48, height: 48)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Paozier")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text(LF("版本 %@", appVersionText))
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+            }
+            Section(L("源码")) {
+                HStack {
+                    Text("github.com/mcxen/paozier")
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                    Spacer()
+                    Button {
+                        NSWorkspace.shared.open(Self.githubURL)
+                    } label: {
+                        Label(L("打开 GitHub"), systemImage: "arrow.up.right.square")
+                    }
+                    .controlSize(.small)
+                }
+            }
+            Section(L("更新")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Button {
+                            checkForUpdates()
+                        } label: {
+                            Label(L("检查更新"), systemImage: "arrow.clockwise")
+                        }
+                        .disabled(updateState.isBusy)
+                        .controlSize(.small)
+
+                        if updateState.isBusy {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                    updateStatusView
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var updateStatusView: some View {
+        switch updateState {
+        case .idle:
+            Text(L("从 GitHub Releases 读取最新版本。"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .checking:
+            Text(L("正在检查 GitHub Releases..."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .installing(let message):
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .latest(let release):
+            VStack(alignment: .leading, spacing: 4) {
+                Text(LF("已是最新版本：%@", release.versionText))
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                installUpdateButton(release)
+                releaseLinkButton(release)
+            }
+        case .available(let release):
+            VStack(alignment: .leading, spacing: 4) {
+                Text(LF("发现新版本：%@", release.versionText))
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                installUpdateButton(release)
+                releaseLinkButton(release)
+            }
+        case .failed(let message):
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func installUpdateButton(_ release: GitHubRelease) -> some View {
+        Button {
+            installUpdate(release)
+        } label: {
+            Label(L("一键更新"), systemImage: "arrow.down.app")
+        }
+        .disabled(!release.hasDMGAsset || updateState.isBusy)
+        .controlSize(.small)
+        .help(release.hasDMGAsset ? L("下载最新 DMG 并覆盖当前应用") : L("此 Release 未提供 DMG"))
+    }
+
+    private func releaseLinkButton(_ release: GitHubRelease) -> some View {
+        Button {
+            NSWorkspace.shared.open(release.htmlURL)
+        } label: {
+            Label(L("查看 Release"), systemImage: "safari")
+        }
+        .controlSize(.small)
+    }
+
+    private var appVersionText: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String
+        let build = info?["CFBundleVersion"] as? String
+        if let version, let build {
+            return "\(version) (\(build))"
+        }
+        if let version {
+            return version
+        }
+        return L("开发版")
+    }
+
+    private func checkForUpdates() {
+        updateState = .checking
+        Task {
+            do {
+                let release = try await GitHubReleaseClient.latestRelease()
+                let state: ReleaseCheckState = release.isNewer(than: appVersionText) ? .available(release) : .latest(release)
+                await MainActor.run {
+                    updateState = state
+                }
+            } catch {
+                await MainActor.run {
+                    updateState = .failed(LF("检查更新失败：%@", error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    private func installUpdate(_ release: GitHubRelease) {
+        updateState = .installing(L("正在下载更新..."))
+        Task {
+            do {
+                try await PaozierAppUpdater.install(release: release)
+            } catch {
+                await MainActor.run {
+                    updateState = .failed(LF("更新失败：%@", error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    private static let githubURL = URL(string: "https://github.com/mcxen/paozier")!
+
+    private static var defaultDataDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("Paozier", isDirectory: true)
+    }
+
+    private var dataDirectory: URL {
+        Self.defaultDataDirectory
     }
 
     private var clearMessage: String {
@@ -355,6 +653,345 @@ private struct SettingsPersistenceModifier: ViewModifier {
                 QuickSearchStatusItemController.shared.sync()
                 QuickSearchPanelController.shared.applySettings()
             }
+    }
+}
+
+private struct SystemUsageSnapshot {
+    let appSizeBytes: Int64
+    let dataSizeBytes: Int64
+    let memoryBytes: Int64
+    let physicalMemoryBytes: Int64
+    let appLocation: String
+
+    var appSizeFraction: Double {
+        scaledStorageFraction(appSizeBytes)
+    }
+
+    var dataSizeFraction: Double {
+        scaledStorageFraction(dataSizeBytes)
+    }
+
+    var memoryFraction: Double {
+        guard physicalMemoryBytes > 0 else { return 0 }
+        return min(Double(memoryBytes) / Double(physicalMemoryBytes), 1)
+    }
+
+    static func load(dataDirectory: URL) -> SystemUsageSnapshot {
+        let appURL = Bundle.main.bundleURL
+        let appSize = FileSystemSizeReader.sizeOfItem(at: appURL)
+        let dataSize = FileSystemSizeReader.sizeOfItem(at: dataDirectory)
+        let memory = ProcessMemoryReader.currentResidentSize()
+        let physicalMemory = Int64(ProcessInfo.processInfo.physicalMemory)
+        return SystemUsageSnapshot(
+            appSizeBytes: appSize,
+            dataSizeBytes: dataSize,
+            memoryBytes: memory,
+            physicalMemoryBytes: physicalMemory,
+            appLocation: appURL.path
+        )
+    }
+
+    private func scaledStorageFraction(_ bytes: Int64) -> Double {
+        guard bytes > 0 else { return 0 }
+        let oneGB = 1024.0 * 1024.0 * 1024.0
+        return min(Double(bytes) / oneGB, 1)
+    }
+}
+
+private enum FileSystemSizeReader {
+    static func sizeOfItem(at url: URL) -> Int64 {
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return 0 }
+        if isDirectory.boolValue {
+            return sizeOfDirectory(at: url)
+        }
+        return sizeOfFile(at: url)
+    }
+
+    private static func sizeOfDirectory(at url: URL) -> Int64 {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey]
+        guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: Array(keys)) else { return 0 }
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            total += sizeOfFile(at: fileURL)
+        }
+        return total
+    }
+
+    private static func sizeOfFile(at url: URL) -> Int64 {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey]) else {
+            return 0
+        }
+        guard values.isRegularFile == true else { return 0 }
+        let size = values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0
+        return Int64(size)
+    }
+}
+
+private enum ProcessMemoryReader {
+    static func currentResidentSize() -> Int64 {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { reboundPointer in
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), reboundPointer, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        return Int64(info.resident_size)
+    }
+}
+
+private struct RainbowUsageRow: View {
+    let title: String
+    let valueText: String
+    let detailText: String
+    let fraction: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(title)
+                    .font(.subheadline)
+                Spacer()
+                Text(valueText)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.primary.opacity(0.08))
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(8, proxy.size.width * fraction))
+                }
+            }
+            .frame(height: 8)
+            Text(detailText)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
+    }
+}
+
+private enum ReleaseCheckState {
+    case idle
+    case checking
+    case installing(String)
+    case latest(GitHubRelease)
+    case available(GitHubRelease)
+    case failed(String)
+
+    var isBusy: Bool {
+        if case .checking = self { return true }
+        if case .installing = self { return true }
+        return false
+    }
+}
+
+private struct GitHubRelease: Decodable {
+    let tagName: String
+    let name: String?
+    let htmlURL: URL
+    let assets: [GitHubReleaseAsset]
+
+    var versionText: String {
+        if let name, !name.isEmpty, name != tagName {
+            return "\(tagName) · \(name)"
+        }
+        return tagName
+    }
+
+    var dmgAsset: GitHubReleaseAsset? {
+        assets.first { asset in
+            asset.name.lowercased().hasSuffix(".dmg")
+        }
+    }
+
+    var hasDMGAsset: Bool {
+        dmgAsset != nil
+    }
+
+    func isNewer(than currentVersion: String) -> Bool {
+        VersionComparator.is(tagName, newerThan: currentVersion)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case tagName = "tag_name"
+        case name
+        case htmlURL = "html_url"
+        case assets
+    }
+}
+
+private struct GitHubReleaseAsset: Decodable {
+    let name: String
+    let downloadURL: URL
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case downloadURL = "browser_download_url"
+    }
+}
+
+private enum GitHubReleaseClient {
+    static func latestRelease() async throws -> GitHubRelease {
+        let url = URL(string: "https://api.github.com/repos/mcxen/paozier/releases/latest")!
+        var request = URLRequest(url: url)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("Paozier", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
+            throw ReleaseCheckError.badResponse
+        }
+        return try JSONDecoder().decode(GitHubRelease.self, from: data)
+    }
+}
+
+private enum ReleaseCheckError: LocalizedError {
+    case badResponse
+    case noDMGAsset
+    case notAppBundle
+    case helperScriptFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .badResponse:
+            return L("GitHub 返回了非成功状态")
+        case .noDMGAsset:
+            return L("此 Release 未提供 DMG")
+        case .notAppBundle:
+            return L("当前不是 .app 包，不能自动覆盖安装")
+        case .helperScriptFailed:
+            return L("无法启动更新助手")
+        }
+    }
+}
+
+private enum PaozierAppUpdater {
+    static func install(release: GitHubRelease) async throws {
+        guard let asset = release.dmgAsset else { throw ReleaseCheckError.noDMGAsset }
+
+        let appURL = Bundle.main.bundleURL
+        guard appURL.pathExtension == "app" else { throw ReleaseCheckError.notAppBundle }
+
+        let fileManager = FileManager.default
+        let updateDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent("paozier-update-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: updateDirectory, withIntermediateDirectories: true)
+
+        let (downloadedFile, _) = try await URLSession.shared.download(from: asset.downloadURL)
+        let dmgURL = updateDirectory.appendingPathComponent(asset.name)
+        try fileManager.moveItem(at: downloadedFile, to: dmgURL)
+
+        let scriptURL = updateDirectory.appendingPathComponent("install-paozier-update.sh")
+        let script = helperScript(appURL: appURL, dmgURL: dmgURL, updateDirectory: updateDirectory)
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = [scriptURL.path]
+        do {
+            try process.run()
+        } catch {
+            throw ReleaseCheckError.helperScriptFailed
+        }
+
+        await MainActor.run {
+            NSApp.terminate(nil)
+        }
+    }
+
+    private static func helperScript(appURL: URL, dmgURL: URL, updateDirectory: URL) -> String {
+        let appPath = shellQuoted(appURL.path)
+        let dmgPath = shellQuoted(dmgURL.path)
+        let updatePath = shellQuoted(updateDirectory.path)
+        return """
+        #!/bin/zsh
+        set -euo pipefail
+
+        APP_PATH=\(appPath)
+        DMG_PATH=\(dmgPath)
+        UPDATE_DIR=\(updatePath)
+        MOUNT_DIR="$UPDATE_DIR/mount"
+
+        sleep 1
+        mkdir -p "$MOUNT_DIR"
+
+        cleanup() {
+            /usr/bin/hdiutil detach "$MOUNT_DIR" -quiet >/dev/null 2>&1 || true
+            /bin/rm -rf "$UPDATE_DIR"
+        }
+        trap cleanup EXIT
+
+        /usr/bin/hdiutil attach "$DMG_PATH" -mountpoint "$MOUNT_DIR" -nobrowse -readonly -quiet
+        SOURCE_APP="$(/usr/bin/find "$MOUNT_DIR" -maxdepth 3 -name "Paozier.app" -type d | /usr/bin/head -n 1)"
+        if [[ -z "$SOURCE_APP" ]]; then
+            exit 1
+        fi
+
+        if ! /usr/bin/ditto "$SOURCE_APP" "$APP_PATH"; then
+            ADMIN_SOURCE="$(/usr/bin/python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$SOURCE_APP")"
+            ADMIN_TARGET="$(/usr/bin/python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$APP_PATH")"
+            ADMIN_COMMAND="/usr/bin/ditto $ADMIN_SOURCE $ADMIN_TARGET"
+            ESCAPED_ADMIN_COMMAND="${ADMIN_COMMAND//\\/\\\\}"
+            ESCAPED_ADMIN_COMMAND="${ESCAPED_ADMIN_COMMAND//\\"/\\\\\\"}"
+            /usr/bin/osascript -e "do shell script \\"$ESCAPED_ADMIN_COMMAND\\" with administrator privileges"
+        fi
+
+        /usr/bin/open "$APP_PATH"
+        """
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
+private enum VersionComparator {
+    static func `is`(_ candidate: String, newerThan current: String) -> Bool {
+        compare(candidate, current) == .orderedDescending
+    }
+
+    private static func compare(_ lhs: String, _ rhs: String) -> ComparisonResult {
+        let lhsParts = normalizedVersionParts(lhs)
+        let rhsParts = normalizedVersionParts(rhs)
+        let count = max(lhsParts.count, rhsParts.count)
+        for index in 0..<count {
+            let lhsValue = index < lhsParts.count ? lhsParts[index] : 0
+            let rhsValue = index < rhsParts.count ? rhsParts[index] : 0
+            if lhsValue > rhsValue { return .orderedDescending }
+            if lhsValue < rhsValue { return .orderedAscending }
+        }
+        return .orderedSame
+    }
+
+    private static func normalizedVersionParts(_ version: String) -> [Int] {
+        version
+            .lowercased()
+            .replacingOccurrences(of: "version", with: "")
+            .replacingOccurrences(of: "v", with: "")
+            .split { !$0.isNumber }
+            .compactMap { Int($0) }
+    }
+}
+
+private extension ByteCountFormatter {
+    static func paozierString(fromByteCount byteCount: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: byteCount)
     }
 }
 

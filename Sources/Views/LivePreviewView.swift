@@ -17,6 +17,11 @@ struct LivePreviewView: View {
         return ext == "md" || ext == "markdown"
     }
 
+    private var isHTML: Bool {
+        let ext = URL(fileURLWithPath: result.filePath).pathExtension.lowercased()
+        return ext == "html" || ext == "htm"
+    }
+
     private var previewContent: String {
         var content = result.content.isEmpty ? result.snippet : result.content
         content = content.replacingOccurrences(of: "<em>", with: "").replacingOccurrences(of: "</em>", with: "")
@@ -123,7 +128,15 @@ struct LivePreviewView: View {
 
             Divider()
 
-            if isMarkdown {
+            if isHTML {
+                HTMLFileWebPreview(
+                    fileURL: URL(fileURLWithPath: result.filePath),
+                    primaryTerms: searchOptions.usesRegex ? [] : searchOptions.highlightTerms,
+                    primaryNavigationStep: primaryNavigationStep,
+                    secondaryTerms: secondaryTerms,
+                    secondaryNavigationStep: secondaryNavigationStep
+                )
+            } else if isMarkdown {
                 MarkdownWebPreview(
                     markdown: previewContent,
                     baseURL: markdownBaseURL,
@@ -251,6 +264,189 @@ private struct PreviewParagraph: Identifiable {
     let text: String
     let hasPrimaryMatch: Bool
     let hasSecondaryMatch: Bool
+}
+
+private struct HTMLFileWebPreview: NSViewRepresentable {
+    let fileURL: URL
+    let primaryTerms: [String]
+    let primaryNavigationStep: Int
+    let secondaryTerms: [String]
+    let secondaryNavigationStep: Int
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        let controller = WKUserContentController()
+        controller.addUserScript(WKUserScript(source: Self.previewScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        config.userContentController = controller
+
+        let view = WKWebView(frame: .zero, configuration: config)
+        view.setValue(false, forKey: "drawsBackground")
+        view.navigationDelegate = context.coordinator
+        return view
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        context.coordinator.state = PreviewState(
+            primaryTerms: primaryTerms,
+            primaryNavigationStep: primaryNavigationStep,
+            secondaryTerms: secondaryTerms,
+            secondaryNavigationStep: secondaryNavigationStep
+        )
+
+        if context.coordinator.loadedURL != fileURL {
+            context.coordinator.loadedURL = fileURL
+            webView.loadFileURL(fileURL, allowingReadAccessTo: fileURL.deletingLastPathComponent())
+        } else {
+            context.coordinator.applyPreviewState(to: webView)
+        }
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var loadedURL: URL?
+        var state = PreviewState(primaryTerms: [], primaryNavigationStep: 0, secondaryTerms: [], secondaryNavigationStep: 0)
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            applyPreviewState(to: webView)
+        }
+
+        func applyPreviewState(to webView: WKWebView) {
+            let payload = state.javascriptPayload
+            webView.evaluateJavaScript("window.__paozierApplyPreviewState && window.__paozierApplyPreviewState(\(payload));")
+        }
+    }
+
+    struct PreviewState {
+        let primaryTerms: [String]
+        let primaryNavigationStep: Int
+        let secondaryTerms: [String]
+        let secondaryNavigationStep: Int
+
+        var javascriptPayload: String {
+            let value: [String: Any] = [
+                "primaryTerms": primaryTerms,
+                "primaryNavigationStep": primaryNavigationStep,
+                "secondaryTerms": secondaryTerms,
+                "secondaryNavigationStep": secondaryNavigationStep
+            ]
+            let data = (try? JSONSerialization.data(withJSONObject: value)) ?? Data("{}".utf8)
+            return String(data: data, encoding: .utf8) ?? "{}"
+        }
+    }
+
+    private static let previewScript = """
+    (function() {
+      if (window.__paozierHTMLPreviewInstalled) return;
+      window.__paozierHTMLPreviewInstalled = true;
+
+      const style = document.createElement('style');
+      style.textContent = `
+        mark.paozier-primary {
+          background: #ffe66d !important;
+          color: #111 !important;
+          border-radius: 3px !important;
+          padding: 0 2px !important;
+        }
+        mark.paozier-secondary {
+          background: #9de8ff !important;
+          color: #07121a !important;
+          border-radius: 3px !important;
+          padding: 0 2px !important;
+        }
+      `;
+      document.head ? document.head.appendChild(style) : document.documentElement.appendChild(style);
+
+      function unwrapMarks() {
+        document.querySelectorAll('mark.paozier-primary, mark.paozier-secondary').forEach(mark => {
+          const text = document.createTextNode(mark.textContent || '');
+          mark.replaceWith(text);
+        });
+        document.body && document.body.normalize();
+      }
+
+      function collectRanges(text, terms) {
+        const lower = text.toLowerCase();
+        const ranges = [];
+        for (const term of terms) {
+          const needle = String(term || '').toLowerCase();
+          if (!needle) continue;
+          let start = 0;
+          while (start < lower.length) {
+            const index = lower.indexOf(needle, start);
+            if (index < 0) break;
+            ranges.push([index, index + needle.length]);
+            start = index + Math.max(needle.length, 1);
+          }
+        }
+        ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+        const merged = [];
+        for (const range of ranges) {
+          const last = merged[merged.length - 1];
+          if (!last || range[0] > last[1]) merged.push(range);
+          else last[1] = Math.max(last[1], range[1]);
+        }
+        return merged;
+      }
+
+      function highlightTerms(root, terms, className) {
+        if (!root || !terms.length) return;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+          acceptNode(node) {
+            const parent = node.parentElement;
+            if (!parent) return NodeFilter.FILTER_REJECT;
+            if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'INPUT', 'CODE', 'PRE'].includes(parent.tagName)) {
+              return NodeFilter.FILTER_REJECT;
+            }
+            return node.nodeValue && node.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+          }
+        });
+        const nodes = [];
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+
+        for (const node of nodes) {
+          const text = node.nodeValue || '';
+          const ranges = collectRanges(text, terms);
+          if (!ranges.length) continue;
+
+          const fragment = document.createDocumentFragment();
+          let pos = 0;
+          for (const [start, end] of ranges) {
+            if (start > pos) fragment.appendChild(document.createTextNode(text.slice(pos, start)));
+            const mark = document.createElement('mark');
+            mark.className = className;
+            mark.textContent = text.slice(start, end);
+            fragment.appendChild(mark);
+            pos = end;
+          }
+          if (pos < text.length) fragment.appendChild(document.createTextNode(text.slice(pos)));
+          node.replaceWith(fragment);
+        }
+      }
+
+      function jump(selector, step) {
+        const matches = Array.from(document.querySelectorAll(selector));
+        if (!matches.length) return;
+        const index = ((Number(step || 0) % matches.length) + matches.length) % matches.length;
+        matches[index].scrollIntoView({ block: 'center', inline: 'nearest' });
+      }
+
+      window.__paozierApplyPreviewState = function(state) {
+        unwrapMarks();
+        const primaryTerms = Array.isArray(state.primaryTerms) ? state.primaryTerms : [];
+        const secondaryTerms = Array.isArray(state.secondaryTerms) ? state.secondaryTerms : [];
+        highlightTerms(document.body, primaryTerms, 'paozier-primary');
+        highlightTerms(document.body, secondaryTerms, 'paozier-secondary');
+        if (secondaryTerms.length) {
+          jump('mark.paozier-secondary', state.secondaryNavigationStep);
+        } else {
+          jump('mark.paozier-primary', state.primaryNavigationStep);
+        }
+      };
+    })();
+    """
 }
 
 private struct MarkdownWebPreview: NSViewRepresentable {

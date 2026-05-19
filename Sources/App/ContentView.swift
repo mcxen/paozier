@@ -16,12 +16,15 @@ struct ContentView: View {
     @State private var showSearchOptions = false
     @State private var previewMode: PreviewMode = .live
     @State private var showCompendium = false
-    @State private var showHistory = false
+    @State private var showSearchHistory = false
     @State private var activePane: MainPane = .search
     @State private var primaryMatchStep = 0
     @State private var previewFindText = ""
     @State private var previewFindStep = 0
     @State private var searchTask: Task<Void, Never>?
+    @State private var currentSearchStartedAt: Date?
+    @State private var lastSearchDuration: TimeInterval?
+    @State private var lastSearchWasStopped = false
     @State private var documentMatchesCollapsed = false
     @State private var documentMatchesHeight: CGFloat = 190
     @State private var documentMatchJumpCycle = 0
@@ -53,6 +56,18 @@ struct ContentView: View {
         }
     }
 
+    private var searchStatusText: String {
+        if isSearching {
+            let elapsed = currentSearchStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+            return LF("已找到 %d 个结果 · 搜索中 %@", results.count, formatDuration(elapsed))
+        }
+        if let lastSearchDuration {
+            let prefix = lastSearchWasStopped ? L("已停止") : LF("%d 个结果", results.count)
+            return "\(prefix) · \(formatDuration(lastSearchDuration))"
+        }
+        return LF("%d 个结果", results.count)
+    }
+
     var body: some View {
         NavigationSplitView {
             SidebarView(activePane: $activePane)
@@ -70,7 +85,6 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .sheet(isPresented: $showCompendium) { CompendiumView().environmentObject(dataManager) }
-        .sheet(isPresented: $showHistory) { HistoryView(onSelect: { q in searchText = q; showHistory = false; performSearch() }).environmentObject(dataManager) }
         .background {
             Button("") { GlobalSearchPopupController.shared.toggle() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
@@ -81,9 +95,6 @@ struct ContentView: View {
         }
         .task { await indexManager.startup() }
         .onAppear { searchFieldFocused = true }
-        .onChange(of: showHistory) { _, newValue in
-            if !newValue { searchFieldFocused = true }
-        }
         .onChange(of: showCompendium) { _, newValue in
             if !newValue { searchFieldFocused = true }
         }
@@ -130,13 +141,24 @@ struct ContentView: View {
                 .foregroundStyle(showSearchOptions || hasActiveSearchOptions ? Color.accentColor : .secondary)
                 .focusable(false)
                 .help(L("搜索条件"))
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) { showSearchHistory.toggle() }
+                    searchFieldFocused = true
+                } label: {
+                    Image(systemName: showSearchHistory ? "clock.arrow.circlepath" : "clock")
+                        .font(.system(size: 13))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(showSearchHistory ? Color.accentColor : .secondary)
+                .focusable(false)
+                .disabled(dataManager.history.isEmpty)
+                .help(L("搜索历史"))
                 if isSearching {
                     ProgressView().controlSize(.small)
                 }
                 if !searchText.isEmpty {
                     Button {
-                        searchTask?.cancel()
-                        isSearching = false
+                        cancelSearch(recordHistory: false)
                         searchText = ""
                         results = []
                         selectedResult = nil
@@ -145,13 +167,23 @@ struct ContentView: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                     }.buttonStyle(.plain).focusable(false)
                 }
-                Button { performSearch() } label: {
-                    Image(systemName: "arrow.right.circle.fill").font(.system(size: 16))
+                if isSearching {
+                    Button { cancelSearch(recordHistory: true) } label: {
+                        Image(systemName: "stop.circle.fill").font(.system(size: 16))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.red)
+                    .focusable(false)
+                    .help(L("停止搜索"))
+                } else {
+                    Button { performSearch() } label: {
+                        Image(systemName: "arrow.right.circle.fill").font(.system(size: 16))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.secondary : Color.blue)
+                    .focusable(false)
+                    .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.secondary : Color.blue)
-                .focusable(false)
-                .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching)
                 Button { QuickSearchPanelController.shared.toggle(); searchFieldFocused = true } label: {
                     Image(systemName: "rectangle.and.text.magnifyingglass").font(.system(size: 12))
                 }
@@ -172,16 +204,30 @@ struct ContentView: View {
                 Divider()
             }
 
+            if showSearchHistory {
+                searchHistoryPanel
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                Divider()
+            }
+
             // Results header
             if !results.isEmpty {
                 HStack(spacing: 8) {
-                    Text(isSearching ? LF("已找到 %d 个结果...", results.count) : LF("%d 个结果", results.count))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                    TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                        Text(searchStatusText)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
-                    Button { showHistory.toggle() } label: {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.16)) { showSearchHistory.toggle() }
+                    } label: {
                         Image(systemName: "clock").font(.system(size: 11))
-                    }.buttonStyle(.plain).foregroundStyle(.secondary).help(L("搜索历史"))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(showSearchHistory ? Color.accentColor : .secondary)
+                    .disabled(dataManager.history.isEmpty)
+                    .help(L("搜索历史"))
                     Button { showCompendium.toggle() } label: {
                         Image(systemName: "doc.text.image").font(.system(size: 11))
                     }.buttonStyle(.plain).foregroundStyle(.secondary).help(L("报告"))
@@ -223,8 +269,61 @@ struct ContentView: View {
                 .listStyle(.plain)
                 .animation(.smooth(duration: 0.25), value: results.map(\.id))
             }
+
         }
         .frame(minWidth: 300)
+    }
+
+    private var searchHistoryPanel: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Label(L("查找历史"), systemImage: "clock.arrow.circlepath")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(L("清空")) { dataManager.clearHistory() }
+                    .font(.system(size: 10))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tertiary)
+            }
+
+            if dataManager.history.isEmpty {
+                Text(L("暂无搜索历史"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(dataManager.history.prefix(8)) { item in
+                            Button {
+                                searchText = item.query
+                                performSearch()
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.query)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .lineLimit(1)
+                                    Text(historyMetaText(item))
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                }
+                                .frame(width: 116, alignment: .leading)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(Color.primary.opacity(0.06))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isSearching)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 
     // MARK: - Detail Pane (Preview)
@@ -732,15 +831,18 @@ struct ContentView: View {
     private func performSearch() {
         let q = searchText.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else {
-            searchTask?.cancel()
-            isSearching = false
+            cancelSearch(recordHistory: false)
             return
         }
         searchTask?.cancel()
         isSearching = true
+        currentSearchStartedAt = Date()
+        lastSearchDuration = nil
+        lastSearchWasStopped = false
         results = []
         selectedResult = nil
         let options = currentSearchOptions
+        let startedAt = currentSearchStartedAt ?? Date()
         searchTask = Task {
             await withTaskGroup(of: Void.self) { group in
                 group.addTask {
@@ -775,11 +877,53 @@ struct ContentView: View {
 
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                isSearching = false
-                dataManager.addHistory(query: q, resultCount: results.count)
-                searchFieldFocused = true
+                finishSearch(query: q, startedAt: startedAt, wasStopped: false)
             }
         }
+    }
+
+    private func cancelSearch(recordHistory: Bool) {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let startedAt = currentSearchStartedAt
+        searchTask?.cancel()
+        searchTask = nil
+        isSearching = false
+        currentSearchStartedAt = nil
+        if let startedAt {
+            let duration = Date().timeIntervalSince(startedAt)
+            lastSearchDuration = duration
+            lastSearchWasStopped = true
+            if recordHistory {
+                dataManager.addHistory(query: query, resultCount: results.count, duration: duration)
+            }
+        }
+        searchFieldFocused = true
+    }
+
+    private func finishSearch(query: String, startedAt: Date, wasStopped: Bool) {
+        let duration = Date().timeIntervalSince(startedAt)
+        isSearching = false
+        currentSearchStartedAt = nil
+        lastSearchDuration = duration
+        lastSearchWasStopped = wasStopped
+        dataManager.addHistory(query: query, resultCount: results.count, duration: duration)
+        searchFieldFocused = true
+    }
+
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        if duration < 1 {
+            return String(format: "%.0fms", max(duration, 0) * 1000)
+        }
+        if duration < 10 {
+            return String(format: "%.1fs", duration)
+        }
+        return String(format: "%.0fs", duration)
+    }
+
+    private func historyMetaText(_ item: SearchHistoryItem) -> String {
+        let countText = LF("%d 结果", item.resultCount)
+        guard let duration = item.duration else { return countText }
+        return "\(countText) · \(formatDuration(duration))"
     }
 
     private func appendSearchResults(_ newItems: [SearchResult]) {

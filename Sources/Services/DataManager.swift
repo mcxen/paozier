@@ -62,10 +62,14 @@ class DataManager: ObservableObject {
 
     // MARK: - History
 
-    func addHistory(query: String, resultCount: Int) {
-        let item = SearchHistoryItem(query: query, resultCount: resultCount)
+    func addHistory(query: String, resultCount: Int, duration: TimeInterval? = nil) {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty else { return }
+        let item = SearchHistoryItem(query: normalizedQuery, resultCount: resultCount, duration: duration)
+        history.removeAll { $0.query == normalizedQuery }
         history.insert(item, at: 0)
-        if history.count > 100 { history = Array(history.prefix(100)) }
+        let maxItems = max(10, AppSettings.shared.historyMaxItems)
+        if history.count > maxItems { history = Array(history.prefix(maxItems)) }
         save()
     }
 

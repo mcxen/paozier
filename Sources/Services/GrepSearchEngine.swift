@@ -31,7 +31,7 @@ actor GrepSearchEngine {
         let folders = folderPaths.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
 
         return AsyncStream { continuation in
-            Task.detached(priority: .userInitiated) { [rgPath, grepPath, batchSize, maxMatchesPerFile, smallFileLimit, skippedExtensions] in
+            let worker = Task.detached(priority: .userInitiated) { [rgPath, grepPath, batchSize, maxMatchesPerFile, smallFileLimit, skippedExtensions] in
                 guard !trimmedQuery.isEmpty, !folders.isEmpty else {
                     continuation.yield(GrepBatchResult(results: [], isFinal: true))
                     continuation.finish()
@@ -81,6 +81,9 @@ actor GrepSearchEngine {
                 }
                 continuation.yield(GrepBatchResult(results: [], isFinal: true))
                 continuation.finish()
+            }
+            continuation.onTermination = { @Sendable _ in
+                worker.cancel()
             }
         }
     }
