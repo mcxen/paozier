@@ -600,6 +600,7 @@ class IndexManager: ObservableObject {
             limit: s.searchResultLimit,
             skWeight: s.searchEngineWeightSK,
             ftsWeight: s.searchEngineWeightFTS,
+            tantivyWeight: s.searchEngineWeightTantivy,
             searchFilenames: s.searchFilenames,
             enableImageOCR: s.enableImageOCR,
             imageOCRScope: s.imageOCRScope

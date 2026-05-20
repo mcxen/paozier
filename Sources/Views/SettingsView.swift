@@ -287,7 +287,12 @@ struct SettingsView: View {
                     Slider(value: $settings.searchEngineWeightFTS, in: 0...1, step: 0.1)
                     Text(String(format: "%.1f", settings.searchEngineWeightFTS)).monospacedDigit().frame(width: 30)
                 }
-                Text(L("权重决定双引擎结果的融合排序比例")).font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("Tantivy")
+                    Slider(value: $settings.searchEngineWeightTantivy, in: 0...1, step: 0.1)
+                    Text(String(format: "%.1f", settings.searchEngineWeightTantivy)).monospacedDigit().frame(width: 30)
+                }
+                Text(L("权重决定三引擎结果的融合排序比例")).font(.caption).foregroundStyle(.secondary)
             }
             Section(L("范围")) {
                 Toggle(L("同时搜索文件名"), isOn: $settings.searchFilenames)

@@ -27,6 +27,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache Cargo Build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/paozier-tantivy-sidecar
+
       - name: Resolve Version
         id: version
         shell: bash
@@ -44,6 +54,8 @@ jobs:
 
       - name: Build and Package App Bundle
         shell: bash
+        env:
+          SIDECAR_TARGET_TRIPLE: aarch64-apple-darwin
         run: |
           set -euo pipefail
           bash scripts/build_app.sh "${{ steps.version.outputs.version }}" "${{ github.run_number }}"
@@ -55,11 +67,15 @@ jobs:
 
           APP_PATH="dist/${APP_NAME}.app"
           test -x "${APP_PATH}/Contents/MacOS/${APP_NAME}"
+          test -x "${APP_PATH}/Contents/Resources/bin/paozier-tantivy-sidecar"
 
           if ! find "${APP_PATH}/Contents/Resources" -name marked.umd.js -print -quit | grep -q .; then
             echo "ERROR: marked.umd.js was not packaged into ${APP_PATH}"
             exit 1
           fi
+
+          file "${APP_PATH}/Contents/Resources/bin/paozier-tantivy-sidecar" | tee /tmp/paozier-sidecar-file.txt
+          grep -q "arm64" /tmp/paozier-sidecar-file.txt
 
           codesign --verify --deep --strict "${APP_PATH}"
 

@@ -248,7 +248,7 @@ struct ContentView: View {
                     Text(searchText.isEmpty ? L("输入关键词搜索全部文档") : L("无匹配结果"))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                    Text(hasEnabledMemosSources ? "SearchKit + SQLite FTS5 + grep + Memos" : "SearchKit + SQLite FTS5 + grep")
+                    Text(hasEnabledMemosSources ? "SearchKit + SQLite FTS5 + Tantivy + grep + Memos" : "SearchKit + SQLite FTS5 + Tantivy + grep")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }

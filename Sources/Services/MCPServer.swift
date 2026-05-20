@@ -199,7 +199,7 @@ class MCPServer {
 
         case "index_status":
             let count = await SearchEngine.shared.documentCount
-            return "Documents: \(count)\nEngines: SearchKit + SQLite FTS5\nHTTP: localhost:9880\nMCP: localhost:9881"
+            return "Documents: \(count)\nEngines: SearchKit + SQLite FTS5 + Tantivy\nHTTP: localhost:9880\nMCP: localhost:9881"
 
         case "list_files":
             let path = arguments["path"] as? String ?? ""

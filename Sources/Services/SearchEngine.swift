@@ -6,7 +6,7 @@ import ImageIO
 import PDFKit
 import Vision
 
-/// Dual-engine search: Apple SearchKit (relevance ranking) + SQLite FTS5 (CJK)
+/// Triple-engine search: Apple SearchKit + SQLite FTS5 + Tantivy
 actor SearchEngine {
     static let shared = SearchEngine()
 
@@ -16,21 +16,24 @@ actor SearchEngine {
     private let skPath: URL
     private let ftsPath: URL
     private let extractedTextCacheDir: URL
+    private let tantivyEngine: TantivyEngine
 
     // Settings cache (updated from AppSettings on main actor)
     var _settingsLimit: Int = 30
     var _settingsSKWeight: Double = 0.6
     var _settingsFTSWeight: Double = 0.4
+    var _settingsTantivyWeight: Double = 0.25
     var _searchFilenames: Bool = true
     var _enableImageOCR: Bool = false
     var _imageOCRScope: String = ImageOCRScope.markdownOnly.rawValue
 
     private var _indexedURLs: Set<URL> = []
 
-    func updateSettings(limit: Int, skWeight: Double, ftsWeight: Double, searchFilenames: Bool = true, enableImageOCR: Bool = false, imageOCRScope: String = ImageOCRScope.markdownOnly.rawValue) {
+    func updateSettings(limit: Int, skWeight: Double, ftsWeight: Double, tantivyWeight: Double = 0.25, searchFilenames: Bool = true, enableImageOCR: Bool = false, imageOCRScope: String = ImageOCRScope.markdownOnly.rawValue) {
         _settingsLimit = limit
         _settingsSKWeight = skWeight
         _settingsFTSWeight = ftsWeight
+        _settingsTantivyWeight = tantivyWeight
         _searchFilenames = searchFilenames
         _enableImageOCR = enableImageOCR
         _imageOCRScope = imageOCRScope
@@ -42,6 +45,7 @@ actor SearchEngine {
         skPath = dataDir.appendingPathComponent("searchkit.index")
         ftsPath = dataDir.appendingPathComponent("fts.db")
         extractedTextCacheDir = dataDir.appendingPathComponent("extracted-text-cache", isDirectory: true)
+        tantivyEngine = TantivyEngine(dataDir: dataDir)
         try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: extractedTextCacheDir, withIntermediateDirectories: true)
     }
@@ -63,9 +67,12 @@ actor SearchEngine {
         } else {
             _ = ftsIndex.create(filePath: ftsPath.path)
         }
+
+        tantivyEngine.prepare()
     }
 
     func close() {
+        tantivyEngine.commit()
         skIndex?.save()
         skIndex?.close()
         skIndex = nil
@@ -85,6 +92,9 @@ actor SearchEngine {
 
         // FTS
         _ = ftsIndex.add(url: fileURL, text: normalized)
+
+        // Tantivy
+        tantivyEngine.queueAdd(url: fileURL, content: normalized)
 
         // Track indexed URL
         _indexedURLs.insert(fileURL)
@@ -109,11 +119,13 @@ actor SearchEngine {
 
     func commit() {
         skIndex?.flush()
+        tantivyEngine.commit()
     }
 
     func removeFile(at fileURL: URL) {
         _ = skIndex?.remove(url: fileURL)
         _ = ftsIndex.remove(url: fileURL)
+        tantivyEngine.queueDelete(url: fileURL)
         _indexedURLs.remove(fileURL)
     }
 
@@ -121,6 +133,7 @@ actor SearchEngine {
         guard !fileURLs.isEmpty else { return }
         skIndex?.remove(urls: fileURLs)
         _ = ftsIndex.remove(urls: fileURLs)
+        tantivyEngine.queueDelete(urls: fileURLs)
         for url in fileURLs { _indexedURLs.remove(url) }
     }
 
@@ -128,6 +141,7 @@ actor SearchEngine {
         close()
         try? FileManager.default.removeItem(at: skPath)
         try? FileManager.default.removeItem(at: ftsPath)
+        tantivyEngine.reset()
         _indexedURLs.removeAll()
         open()
     }
@@ -148,32 +162,38 @@ actor SearchEngine {
 
     // MARK: - Search (fused results)
 
-    func search(options: SearchOptions, limit: Int = 0, skWeight: Double = 0, ftsWeight: Double = 0) -> [SearchResult] {
+    func search(options: SearchOptions, limit: Int = 0, skWeight: Double = 0, ftsWeight: Double = 0, tantivyWeight: Double = 0) -> [SearchResult] {
         if options.usesRegex {
             return regexSearch(options: options, limit: limit)
         }
 
         let query = Self.normalizeForSearch(options.trimmedQuery)
+        let isAdvancedQuery = QueryParser.isAdvanced(query)
         let effectiveLimit = limit > 0 ? limit : _settingsLimit
         let engineLimit = options.folderPaths.isEmpty ? effectiveLimit : max(effectiveLimit * 8, 200)
+        let candidateLimit = isAdvancedQuery ? effectiveLimit : max(effectiveLimit * 6, 60)
         let wSK = skWeight > 0 ? skWeight : _settingsSKWeight
         let wFTS = ftsWeight > 0 ? ftsWeight : _settingsFTSWeight
+        let wTantivy = tantivyWeight > 0 ? tantivyWeight : _settingsTantivyWeight
         let allowedExtensions = options.allowedExtensions
         var scoreMap: [String: (score: Double, url: URL)] = [:]
 
         // Parse query for engine-specific formats
         let skQuery: String
         let ftsQuery: String
-        if QueryParser.isAdvanced(query) {
+        let tantivyQuery: String
+        if isAdvancedQuery {
             let tokens = QueryParser.parse(query)
             skQuery = QueryParser.toSearchKit(tokens)
             ftsQuery = QueryParser.toFTS5(tokens)
+            tantivyQuery = QueryParser.toTantivy(tokens)
         } else {
             // Simple query: add * suffix for prefix matching on each word
             let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
             let prefixWords = words.map { $0.hasSuffix("*") ? $0 : $0 + "*" }
             skQuery = prefixWords.joined(separator: " ")
             ftsQuery = prefixWords.joined(separator: " ")
+            tantivyQuery = query
         }
 
         // SearchKit results
@@ -198,31 +218,43 @@ actor SearchEngine {
             }
         }
 
+        let tantivyResults = tantivyEngine.search(query: tantivyQuery, limit: engineLimit)
+        if !tantivyResults.isEmpty {
+            for (i, hit) in tantivyResults.enumerated() {
+                let url = URL(fileURLWithPath: hit.path)
+                let path = url.path
+                let tantivyScore = Double(tantivyResults.count - i) / Double(max(tantivyResults.count, 1)) * wTantivy
+                if let existing = scoreMap[path] {
+                    scoreMap[path] = (score: existing.score + tantivyScore, url: existing.url)
+                } else {
+                    scoreMap[path] = (score: tantivyScore, url: url)
+                }
+            }
+        }
+
         let filtered: [String: (score: Double, url: URL)]
         filtered = scoreMap.filter { _, item in
             fileAllowed(item.url, extensions: allowedExtensions, folderPaths: options.folderPaths)
         }
 
-        let sorted = filtered.values.sorted { $0.score > $1.score }.prefix(effectiveLimit)
+        let sorted = filtered.values.sorted { $0.score > $1.score }.prefix(candidateLimit)
 
         // Filename matching: add results where filename matches but content didn't
         var filenameMatchedPaths: Set<String> = []
         var filenameMatches: [(score: Double, url: URL)] = []
-        if _searchFilenames {
-            let terms = options.highlightTerms.map { $0.lowercased() }
-            // Check all indexed docs via FTS index URLs
+        if _searchFilenames && !isAdvancedQuery {
+            let normalizedTerms = normalizedHighlightTerms(for: options)
             for url in allIndexedURLs() {
                 let path = url.path
                 guard filtered[path] == nil else { continue }
                 guard fileAllowed(url, extensions: allowedExtensions, folderPaths: options.folderPaths) else { continue }
-                let name = url.lastPathComponent.lowercased()
-                if terms.contains(where: { name.contains($0) }) {
+                if simpleSearchMatch(in: url.lastPathComponent, normalizedQuery: query, normalizedTerms: normalizedTerms) != nil {
                     filenameMatchedPaths.insert(path)
                     filenameMatches.append((score: 0.3, url: url))
                 }
             }
         }
-        var combined = Array(sorted) + filenameMatches.prefix(effectiveLimit / 3)
+        var combined = Array(sorted) + filenameMatches.prefix(max(effectiveLimit / 3, 5))
 
         if options.fuzzySpaces, !options.highlightTerms.isEmpty {
             let existing = Set(combined.map { $0.url.path })
@@ -230,33 +262,94 @@ actor SearchEngine {
             combined += fuzzyMatches
         }
 
-        return combined.prefix(effectiveLimit).map { item in
+        if isAdvancedQuery {
+            return combined.prefix(effectiveLimit).map { item in
+                let path = item.url.path
+                let fileName = item.url.lastPathComponent
+                let rawContent = searchResultContent(for: item.url, options: options)
+                let matchedPageIndex = item.url.pathExtension.lowercased() == "pdf" ? firstMatchedPDFPageIndex(in: rawContent, options: options) : nil
+                let content = Self.stripPDFPageMarkers(from: rawContent)
+                let isFilenameMatch = filenameMatchedPaths.contains(path)
+                let snippet: String
+                if isFilenameMatch {
+                    snippet = LF("文件名匹配: %@", fileName)
+                } else {
+                    snippet = extractSnippet(path: path, options: options)
+                }
+                return SearchResult(
+                    id: path,
+                    filePath: path,
+                    fileName: fileName,
+                    title: fileName,
+                    author: "",
+                    snippet: snippet,
+                    content: content,
+                    fileSize: fileSize(at: path),
+                    lastModified: nil,
+                    matchedPageIndex: matchedPageIndex,
+                    isFilenameMatch: isFilenameMatch
+                )
+            }
+        }
+
+        let normalizedTerms = normalizedHighlightTerms(for: options)
+        var verifiedResults: [(score: Double, result: SearchResult)] = []
+        var seenPaths: Set<String> = []
+
+        for item in combined {
             let path = item.url.path
+            if seenPaths.contains(path) { continue }
+            seenPaths.insert(path)
+
             let fileName = item.url.lastPathComponent
             let rawContent = searchResultContent(for: item.url, options: options)
-            let matchedPageIndex = item.url.pathExtension.lowercased() == "pdf" ? firstMatchedPDFPageIndex(in: rawContent, options: options) : nil
             let content = Self.stripPDFPageMarkers(from: rawContent)
-            let isFilenameMatch = filenameMatchedPaths.contains(path)
-            let snippet: String
-            if isFilenameMatch {
-                snippet = LF("文件名匹配: %@", fileName)
-            } else {
-                snippet = extractSnippet(path: path, options: options)
+            let contentMatch = simpleSearchMatch(in: rawContent, normalizedQuery: query, normalizedTerms: normalizedTerms)
+            let filenameMatch = _searchFilenames ? simpleSearchMatch(in: fileName, normalizedQuery: query, normalizedTerms: normalizedTerms) : nil
+
+            if let contentMatch {
+                let matchedPageIndex = item.url.pathExtension.lowercased() == "pdf" ? pageIndex(before: contentMatch.range.location, in: rawContent) : nil
+                let result = SearchResult(
+                    id: path,
+                    filePath: path,
+                    fileName: fileName,
+                    title: fileName,
+                    author: "",
+                    snippet: snippet(in: rawContent, around: contentMatch.range),
+                    content: content,
+                    fileSize: fileSize(at: path),
+                    lastModified: nil,
+                    matchedPageIndex: matchedPageIndex,
+                    isFilenameMatch: false
+                )
+                verifiedResults.append((
+                    score: item.score + simpleSearchBoost(for: contentMatch, termCount: normalizedTerms.count),
+                    result: result
+                ))
+                continue
             }
-            return SearchResult(
+
+            guard filenameMatch != nil else { continue }
+            let result = SearchResult(
                 id: path,
                 filePath: path,
                 fileName: fileName,
                 title: fileName,
                 author: "",
-                snippet: snippet,
+                snippet: LF("文件名匹配: %@", fileName),
                 content: content,
                 fileSize: fileSize(at: path),
                 lastModified: nil,
-                matchedPageIndex: matchedPageIndex,
-                isFilenameMatch: isFilenameMatch
+                matchedPageIndex: nil,
+                isFilenameMatch: true
             )
+            verifiedResults.append((score: min(item.score, 0.12), result: result))
         }
+
+        return verifiedResults
+            .sorted { $0.score > $1.score }
+            .prefix(effectiveLimit)
+            .map(\.result)
     }
 
     func search(query: String, limit: Int = 0, skWeight: Double = 0, ftsWeight: Double = 0, fileTypeFilter: FileTypeFilter = .all) -> [SearchResult] {
@@ -655,6 +748,55 @@ actor SearchEngine {
         return Self.stripPDFPageMarkers(from: String(content[start..<end])).replacingOccurrences(of: "\n", with: " ")
     }
 
+    private func normalizedHighlightTerms(for options: SearchOptions) -> [String] {
+        options.highlightTerms
+            .map { Self.normalizeForSearch($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func simpleSearchMatch(in text: String, normalizedQuery: String, normalizedTerms: [String]) -> SearchMatch? {
+        let normalizedText = Self.normalizeForSearch(text)
+        guard !normalizedText.isEmpty else { return nil }
+
+        if !normalizedQuery.isEmpty,
+           let exactRange = normalizedText.range(of: normalizedQuery, options: [.caseInsensitive]) {
+            return SearchMatch(
+                range: NSRange(exactRange, in: normalizedText),
+                exactQueryMatched: true,
+                termSpan: normalizedText.distance(from: exactRange.lowerBound, to: exactRange.upperBound)
+            )
+        }
+
+        guard !normalizedTerms.isEmpty else { return nil }
+
+        var ranges: [Range<String.Index>] = []
+        ranges.reserveCapacity(normalizedTerms.count)
+        for term in normalizedTerms {
+            guard let range = normalizedText.range(of: term, options: [.caseInsensitive]) else { return nil }
+            ranges.append(range)
+        }
+
+        guard let firstRange = ranges.min(by: { $0.lowerBound < $1.lowerBound }),
+              let lastRange = ranges.max(by: { $0.upperBound < $1.upperBound }) else {
+            return nil
+        }
+
+        return SearchMatch(
+            range: NSRange(firstRange, in: normalizedText),
+            exactQueryMatched: false,
+            termSpan: normalizedText.distance(from: firstRange.lowerBound, to: lastRange.upperBound)
+        )
+    }
+
+    private func simpleSearchBoost(for match: SearchMatch, termCount: Int) -> Double {
+        var boost = match.exactQueryMatched ? 0.45 : 0.18
+        if termCount > 1 {
+            let compactness = max(0, 1 - Double(max(match.termSpan - 40, 0)) / 220)
+            boost += 0.18 * compactness
+        }
+        return boost
+    }
+
     private func fileSize(at path: String) -> Int64 {
         (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int64) ?? 0
     }
@@ -726,6 +868,12 @@ actor SearchEngine {
     private static let defaultOCRLanguages = ["zh-Hans", "zh-Hant", "en-US"]
     private static let pdfPageMarkerPrefix = "[[PAOZIER_PAGE_"
     private static let pdfPageMarkerRegex = try! NSRegularExpression(pattern: #"\[\[PAOZIER_PAGE_(\d+)\]\]"#)
+
+    private struct SearchMatch {
+        let range: NSRange
+        let exactQueryMatched: Bool
+        let termSpan: Int
+    }
 
     private static func pdfPageMarker(for pageIndex: Int) -> String {
         "\(pdfPageMarkerPrefix)\(pageIndex)]]"

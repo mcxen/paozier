@@ -86,6 +86,22 @@ struct QueryParser {
         return parts.joined(separator: " ")
     }
 
+    /// Generate Tantivy query string.
+    /// Tantivy query parser accepts quoted phrases and boolean operators.
+    static func toTantivy(_ tokens: [QueryToken]) -> String {
+        var parts: [String] = []
+        for token in tokens {
+            switch token {
+            case .term(let t): parts.append(t)
+            case .phrase(let p): parts.append("\"\(p)\"")
+            case .and: parts.append("AND")
+            case .or: parts.append("OR")
+            case .not: parts.append("NOT")
+            }
+        }
+        return parts.joined(separator: " ")
+    }
+
     /// Check if query uses advanced syntax (has operators, quotes, or wildcards)
     static func isAdvanced(_ input: String) -> Bool {
         input.contains("\"") || input.contains("*") ||

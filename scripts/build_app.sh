@@ -14,7 +14,19 @@ APP_PATH="$DIST_DIR/$APP_NAME.app"
 CONTENTS="$APP_PATH/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
+SIDECAR_DEST_DIR="$RESOURCES/bin"
+SIDECAR_DEST="$SIDECAR_DEST_DIR/paozier-tantivy-sidecar"
 APP_ICON_SOURCE="$PROJECT_DIR/Assets/AppIcon.png"
+SIDECAR_MANIFEST="$PROJECT_DIR/rust/paozier-tantivy-sidecar/Cargo.toml"
+HOST_ARCH="$(uname -m)"
+if [ "$HOST_ARCH" = "arm64" ]; then
+    DEFAULT_SIDECAR_TARGET_TRIPLE="aarch64-apple-darwin"
+else
+    DEFAULT_SIDECAR_TARGET_TRIPLE="x86_64-apple-darwin"
+fi
+SIDECAR_TARGET_TRIPLE="${SIDECAR_TARGET_TRIPLE:-$DEFAULT_SIDECAR_TARGET_TRIPLE}"
+SIDECAR_TARGET_DIR="$PROJECT_DIR/rust/paozier-tantivy-sidecar/target"
+SIDECAR_BINARY="$SIDECAR_TARGET_DIR/$SIDECAR_TARGET_TRIPLE/release/paozier-tantivy-sidecar"
 
 echo "==> Building $APP_NAME v$VERSION ($BUILD_NUMBER)..."
 
@@ -40,7 +52,7 @@ fi
 echo "==> Packaging .app bundle..."
 
 rm -rf "$APP_PATH"
-mkdir -p "$MACOS" "$RESOURCES"
+mkdir -p "$MACOS" "$RESOURCES" "$SIDECAR_DEST_DIR"
 
 # Copy binary
 cp "$BINARY" "$MACOS/$APP_NAME"
@@ -49,6 +61,27 @@ chmod +x "$MACOS/$APP_NAME"
 # Copy SwiftPM resource bundles used by packaged previews/resources
 BUILD_PRODUCT_DIR="$(dirname "$BINARY")"
 find "$BUILD_PRODUCT_DIR" -maxdepth 1 -name "*.bundle" -type d -exec cp -R {} "$RESOURCES/" \;
+
+if [ -f "$SIDECAR_MANIFEST" ]; then
+    if ! command -v cargo >/dev/null 2>&1; then
+        echo "ERROR: cargo is required to build the bundled Tantivy sidecar."
+        exit 1
+    fi
+
+    echo "==> Building bundled Tantivy sidecar ($SIDECAR_TARGET_TRIPLE)..."
+    cargo build \
+        --manifest-path "$SIDECAR_MANIFEST" \
+        --release \
+        --target "$SIDECAR_TARGET_TRIPLE"
+
+    if [ ! -f "$SIDECAR_BINARY" ]; then
+        echo "ERROR: Tantivy sidecar not found at $SIDECAR_BINARY"
+        exit 1
+    fi
+
+    cp "$SIDECAR_BINARY" "$SIDECAR_DEST"
+    chmod +x "$SIDECAR_DEST"
+fi
 
 # Info.plist
 cat > "$CONTENTS/Info.plist" <<PLIST
@@ -144,6 +177,9 @@ fi
 
 # Ad-hoc codesign (no Apple Developer ID needed for local use)
 echo "==> Signing..."
+if [ -f "$SIDECAR_DEST" ]; then
+    codesign --force --sign - "$SIDECAR_DEST"
+fi
 codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_PATH"
 rm -f "$ENTITLEMENTS"
 

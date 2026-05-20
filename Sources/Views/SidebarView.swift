@@ -74,7 +74,7 @@ struct SidebarView: View {
                 .foregroundStyle(.blue)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Paozier").font(.headline)
-                Text("SearchKit + FTS5").font(.caption2).foregroundStyle(.secondary)
+                Text("SearchKit + FTS5 + Tantivy").font(.caption2).foregroundStyle(.secondary)
             }
             Spacer()
             Button { SettingsWindowController.shared.show() } label: {
