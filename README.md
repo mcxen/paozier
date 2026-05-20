@@ -1,20 +1,26 @@
+<div align="center">
+
+<img width="128" height="128" alt="狍子应用图标" src="https://github.com/user-attachments/assets/9ccc3ca1-9768-4a32-a747-16a1ba1dcc3b" />
+
 # 狍子 (Paozier)
 
-<img width="128" height="128" alt="AppIcon" src="https://github.com/user-attachments/assets/9ccc3ca1-9768-4a32-a747-16a1ba1dcc3b" />
-
 > **"狍子"（páo zi）** — 森林中可爱又充满好奇心的小鹿，总能在密林深处找到它想要的东西。
+
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue?logo=apple)](https://www.apple.com/macos/)
+[![Swift](https://img.shields.io/badge/Swift-5.9-orange?logo=swift)](https://swift.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+</div>
 
 ---
 
 macOS 本地全文搜索客户端，基于 Apple SearchKit + SQLite FTS5 双引擎，像狍子一样灵敏地在你的文件森林中找到一切。
 
-搜索界面
-
-![搜索界面](README.assets/search-interface.png)
+![狍子搜索界面，展示关键词输入和实时搜索结果](README.assets/search-interface.png)
 
 支持查看索引结果：
 
-![索引结果](README.assets/search-results.png)
+![索引结果列表，展示匹配文件及高亮片段预览](README.assets/search-results.png)
 
 ## 功能特性
 
@@ -34,13 +40,11 @@ PDF · Word (docx) · Excel (xlsx) · PowerPoint (pptx) · RTF · HTML · TXT ·
 
 ## 技术栈
 
-| 组件 | 说明 |
-|---|---|
-| SwiftUI | macOS 14+ 原生应用 |
-| Apple SearchKit | TF-IDF 相关性排序 |
-| SQLite FTS5 | CJK 全文索引 |
-| Network.framework | 轻量 HTTP/TCP 服务器 |
-| PDFKit + QuickLook | 文件预览 |
+- **SwiftUI** — macOS 14+ 原生应用
+- **Apple SearchKit** — TF-IDF 相关性排序
+- **SQLite FTS5** — CJK 全文索引
+- **Network.framework** — 轻量 HTTP/TCP 服务器
+- **PDFKit + QuickLook** — 文件预览
 
 ## 安装与运行
 
@@ -53,7 +57,7 @@ PDF · Word (docx) · Excel (xlsx) · PowerPoint (pptx) · RTF · HTML · TXT ·
 
 ```bash
 # 克隆项目
-git clone https://github.com/user/paozier.git
+git clone https://github.com/mcxen/paozier.git
 cd paozier
 
 # 构建
@@ -74,7 +78,7 @@ swift run Paozier
 
 ### TUI 客户端
 
-项目附带一个基于 Textual 的终端客户端，说明见 [Sources/TUI/README.md](/Users/mcx/Documents/OpenSpring/paozier/Sources/TUI/README.md)。
+项目附带一个基于 Textual 的终端客户端，说明见 [Sources/TUI/README.md](Sources/TUI/README.md)。
 
 ```bash
 cd Sources/TUI
@@ -102,23 +106,23 @@ open http://localhost:9880
 
 ```bash
 # 搜索文档
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_documents","arguments":{"query":"全文搜索"}}}' | nc localhost 9881
+curl -X POST http://localhost:9881 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_documents","arguments":{"query":"全文搜索"}}}'
 ```
 
 可用工具: `search_documents` · `get_document_content` · `index_folder` · `list_indexed_folders` · `index_status` · `list_files` · `get_file_info` · `remove_folder` · `reindex_all`
 
 ## 数据存储
 
-运行时数据位于 `~/Library/Application Support/Paozier/`:
+运行时数据位于 `~/Library/Application Support/Paozier/`：
 
-| 文件 | 用途 |
-|---|---|
-| `searchkit.index` | SearchKit 索引 |
-| `fts.db` | SQLite FTS5 数据库 |
-| `folders.json` | 已索引文件夹 |
-| `history.json` | 搜索历史 |
-| `bookmarks.json` | 书签 |
-| `compendium.json` | 报告 |
+- **`searchkit.index`** — SearchKit 索引
+- **`fts.db`** — SQLite FTS5 数据库
+- **`folders.json`** — 已索引文件夹
+- **`history.json`** — 搜索历史
+- **`bookmarks.json`** — 书签
+- **`compendium.json`** — 报告
 
 ## License
 
