@@ -25,6 +25,8 @@ actor SearchEngine {
     var _enableImageOCR: Bool = false
     var _imageOCRScope: String = ImageOCRScope.markdownOnly.rawValue
 
+    private var _indexedURLs: Set<URL> = []
+
     func updateSettings(limit: Int, skWeight: Double, ftsWeight: Double, searchFilenames: Bool = true, enableImageOCR: Bool = false, imageOCRScope: String = ImageOCRScope.markdownOnly.rawValue) {
         _settingsLimit = limit
         _settingsSKWeight = skWeight
@@ -56,6 +58,8 @@ actor SearchEngine {
         // FTS index
         if FileManager.default.fileExists(atPath: ftsPath.path) {
             _ = ftsIndex.open(filePath: ftsPath.path)
+            // Restore indexed URLs from FTS database
+            _indexedURLs = Set(ftsIndex.allURLs())
         } else {
             _ = ftsIndex.create(filePath: ftsPath.path)
         }
@@ -81,6 +85,9 @@ actor SearchEngine {
 
         // FTS
         _ = ftsIndex.add(url: fileURL, text: normalized)
+
+        // Track indexed URL
+        _indexedURLs.insert(fileURL)
     }
 
     /// Normalize unicode variants (dashes, quotes, whitespace) to ASCII equivalents for consistent search matching
@@ -107,18 +114,21 @@ actor SearchEngine {
     func removeFile(at fileURL: URL) {
         _ = skIndex?.remove(url: fileURL)
         _ = ftsIndex.remove(url: fileURL)
+        _indexedURLs.remove(fileURL)
     }
 
     func removeFiles(at fileURLs: [URL]) {
         guard !fileURLs.isEmpty else { return }
         skIndex?.remove(urls: fileURLs)
         _ = ftsIndex.remove(urls: fileURLs)
+        for url in fileURLs { _indexedURLs.remove(url) }
     }
 
     func removeAll() {
         close()
         try? FileManager.default.removeItem(at: skPath)
         try? FileManager.default.removeItem(at: ftsPath)
+        _indexedURLs.removeAll()
         open()
     }
 
@@ -159,8 +169,11 @@ actor SearchEngine {
             skQuery = QueryParser.toSearchKit(tokens)
             ftsQuery = QueryParser.toFTS5(tokens)
         } else {
-            skQuery = query
-            ftsQuery = query
+            // Simple query: add * suffix for prefix matching on each word
+            let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+            let prefixWords = words.map { $0.hasSuffix("*") ? $0 : $0 + "*" }
+            skQuery = prefixWords.joined(separator: " ")
+            ftsQuery = prefixWords.joined(separator: " ")
         }
 
         // SearchKit results
@@ -351,7 +364,7 @@ actor SearchEngine {
     }
 
     private func allIndexedURLs() -> [URL] {
-        ftsIndex.search(text: "*") ?? []
+        Array(_indexedURLs)
     }
 
     private func fileAllowed(_ url: URL, extensions: Set<String>?, folderPaths: Set<String>) -> Bool {
