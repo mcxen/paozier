@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Darwin
+import UniformTypeIdentifiers
 
 // MARK: - Standalone Window Controller
 
@@ -14,7 +15,7 @@ final class SettingsWindowController {
             return
         }
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 820, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 860, height: 600),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
@@ -86,8 +87,10 @@ struct SettingsView: View {
     @State private var clearTarget = ""
     @State private var memosValidationMessages: [String: String] = [:]
     @State private var selectedCategory: SettingsCategory = .general
+    @State private var sidebarSearchText = ""
     @State private var usageSnapshot = SystemUsageSnapshot.load(dataDirectory: SettingsView.defaultDataDirectory)
     @State private var updateState: ReleaseCheckState = .idle
+    @State private var iconImportError = ""
 
     var body: some View {
         settingsContent
@@ -103,39 +106,105 @@ struct SettingsView: View {
                 Divider()
                 ScrollView {
                     selectedCategoryView
-                        .padding(22)
-                        .frame(maxWidth: 720)
+                        .font(.system(size: 13))
+                        .controlSize(.small)
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 22)
+                        .frame(maxWidth: 680)
                         .frame(maxWidth: .infinity, alignment: .top)
                 }
+                .background(Color(nsColor: .windowBackgroundColor))
             }
         }
-        .frame(width: 820, height: 600)
+        .frame(width: 860, height: 600)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var settingsSidebar: some View {
-        List(selection: $selectedCategory) {
-            ForEach(SettingsCategory.allCases) { category in
-                Label(category.title, systemImage: category.systemImage)
-                    .tag(category)
+        VStack(spacing: 12) {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextField(L("搜索"), text: $sidebarSearchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
             }
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color(nsColor: .textBackgroundColor).opacity(0.58))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(Color.primary.opacity(0.06))
+            )
+            .padding(.top, 10)
+            .padding(.horizontal, 10)
+
+            ScrollView {
+                VStack(spacing: 5) {
+                    ForEach(filteredSidebarCategories) { category in
+                        Button {
+                            selectedCategory = category
+                        } label: {
+                            settingsSidebarRow(category)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 12)
+            }
+            Spacer(minLength: 0)
         }
-        .listStyle(.sidebar)
-        .frame(width: 190)
-        .scrollContentBackground(.hidden)
-        .background(.bar)
+        .frame(width: 200)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var filteredSidebarCategories: [SettingsCategory] {
+        let needle = sidebarSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return SettingsCategory.allCases }
+        return SettingsCategory.allCases.filter { category in
+            category.title.lowercased().contains(needle) ||
+            category.subtitle.lowercased().contains(needle)
+        }
+    }
+
+    private func settingsSidebarRow(_ category: SettingsCategory) -> some View {
+        let selected = category == selectedCategory
+        return HStack(spacing: 9) {
+            Image(systemName: category.systemImage)
+                .font(.system(size: 16, weight: .semibold))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(selected ? .white : Color.accentColor)
+                .frame(width: 22, height: 22)
+            Text(category.title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(selected ? .white : .primary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 36)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(selected ? Color.accentColor : Color.clear)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 7))
     }
 
     private var settingsHeader: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 9) {
             Image(systemName: selectedCategory.systemImage)
                 .foregroundStyle(.blue)
-                .font(.title3)
-                .frame(width: 24)
+                .font(.system(size: 18, weight: .medium))
+                .frame(width: 28)
             VStack(alignment: .leading, spacing: 1) {
                 Text(selectedCategory.title)
-                    .font(.headline)
+                    .font(.system(size: 15, weight: .semibold))
                 Text(selectedCategory.subtitle)
-                    .font(.caption2)
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -143,9 +212,9 @@ struct SettingsView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .background(.bar)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 11)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     @ViewBuilder
@@ -453,25 +522,61 @@ struct SettingsView: View {
         Form {
             Section {
                 HStack(spacing: 12) {
-                    Image(nsImage: NSApp.applicationIconImage)
+                    Image(nsImage: AppIconManager.currentIcon(settings: settings, size: 96))
                         .resizable()
                         .frame(width: 48, height: 48)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Paozier")
-                            .font(.title3)
+                            .font(.system(size: 17, weight: .semibold))
                             .fontWeight(.semibold)
                         Text(LF("版本 %@", appVersionText))
-                            .font(.callout)
+                            .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
                 }
             }
+            Section(L("应用图标")) {
+                VStack(alignment: .leading, spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 10)], spacing: 10) {
+                        ForEach(AppIconPreset.allCases) { preset in
+                            appIconPresetButton(preset)
+                        }
+                    }
+
+                    HStack {
+                        Button {
+                            importCustomIcon()
+                        } label: {
+                            Label(L("选择自定义图标"), systemImage: "photo")
+                        }
+                        .controlSize(.small)
+
+                        if !settings.customAppIconPath.isEmpty {
+                            Button(L("在 Finder 中显示")) {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: settings.customAppIconPath)])
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+
+                    if !iconImportError.isEmpty {
+                        Text(iconImportError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    Text(L("图标会同步用于 Dock、关于页和网页搜索页。"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
             Section(L("源码")) {
                 HStack {
                     Text("github.com/mcxen/paozier")
-                        .font(.system(.body, design: .monospaced))
+                        .font(.system(size: 13, design: .monospaced))
                         .textSelection(.enabled)
                     Spacer()
                     Button {
@@ -502,6 +607,58 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func appIconPresetButton(_ preset: AppIconPreset) -> some View {
+        let selected = settings.appIconPreset == preset.rawValue
+        let image = AppIconManager.presetIcon(preset, size: 80)
+        return Button {
+            if preset == .custom && settings.customAppIconPath.isEmpty {
+                importCustomIcon()
+            } else {
+                settings.appIconPreset = preset.rawValue
+                settings.save()
+                AppIconManager.applyCurrentIcon(settings: settings)
+            }
+        } label: {
+            VStack(spacing: 6) {
+                Image(nsImage: preset == .custom ? AppIconManager.currentIcon(settings: settings, size: 80) : image)
+                    .resizable()
+                    .frame(width: 38, height: 38)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .shadow(color: .black.opacity(0.10), radius: 2, y: 1)
+                Text(preset.title)
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+            .frame(width: 72, height: 68)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(selected ? Color.accentColor.opacity(0.14) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(selected ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: selected ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func importCustomIcon() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .tiff, .heic, .image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.message = L("选择一张方形图片作为 Paozier 图标")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try AppIconManager.importCustomIcon(from: url, settings: settings)
+            iconImportError = ""
+        } catch {
+            iconImportError = error.localizedDescription
+        }
     }
 
     @ViewBuilder
@@ -646,12 +803,14 @@ private struct SettingsPersistenceModifier: ViewModifier {
                     settings.save()
                     QuickSearchStatusItemController.shared.sync()
                     QuickSearchPanelController.shared.applySettings()
+                    AppIconManager.applyCurrentIcon(settings: settings)
                 }
             }
             .onDisappear {
                 settings.save()
                 QuickSearchStatusItemController.shared.sync()
                 QuickSearchPanelController.shared.applySettings()
+                AppIconManager.applyCurrentIcon(settings: settings)
             }
     }
 }

@@ -56,6 +56,11 @@ class HTTPServer {
             return Self.response(status: 200, body: Self.markedScript, contentType: "application/javascript; charset=utf-8")
         }
 
+        if method == "GET" && path == "/assets/app-icon.svg" {
+            let svg = await MainActor.run { AppIconManager.currentIconSVG(settings: AppSettings.shared) }
+            return Self.response(status: 200, body: svg, contentType: "image/svg+xml; charset=utf-8")
+        }
+
         if method == "GET" && path.hasPrefix("/api/search") {
             let query = Self.queryParam(from: path, key: "q") ?? ""
             if query.isEmpty {
@@ -290,7 +295,8 @@ class HTTPServer {
     body{font-family:-apple-system,system-ui,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);height:100dvh;display:flex;flex-direction:column;overflow:hidden}
     .header{flex:0 0 auto;z-index:10;background:var(--bg);border-bottom:1px solid var(--border);padding:.55rem clamp(.75rem,2vw,1.2rem)}
     .topbar{display:grid;grid-template-columns:auto minmax(220px,1fr) auto;gap:.65rem;align-items:center}
-    .brand{font-size:clamp(1rem,2vw,1.15rem);font-weight:700;display:flex;align-items:center;gap:.35rem;white-space:nowrap}
+    .brand{font-size:clamp(1rem,2vw,1.15rem);font-weight:700;display:flex;align-items:center;gap:.45rem;white-space:nowrap}
+    .brand-icon{width:28px;height:28px;border-radius:7px;display:block}
     .search-box{display:flex;gap:.45rem;min-width:0}
     .search-options{display:flex;gap:.75rem;align-items:center;font-size:.76rem;color:var(--muted);white-space:nowrap}
     .search-options label{display:flex;align-items:center;gap:.35rem}
@@ -352,7 +358,7 @@ class HTTPServer {
     <body>
     <div class="header">
       <div class="topbar">
-        <div class="brand">🔍 Paozier</div>
+        <div class="brand"><img class="brand-icon" src="/assets/app-icon.svg" alt="">Paozier</div>
         <div class="search-box"><input id="q" placeholder="搜索文档内容..." autofocus><button class="btn" onclick="doSearch()">搜索</button></div>
         <div class="search-options"><label><input id="includeMemos" type="checkbox">Memos</label><span id="externalStatus">加载中...</span></div>
       </div>

@@ -8,6 +8,7 @@ struct PaozierApp: App {
     init() {
         // Ensure app activates as regular GUI app when launched from .app bundle
         NSApplication.shared.setActivationPolicy(.regular)
+        AppIconManager.applyCurrentIcon(settings: AppSettings.shared)
         // Defer hotkey registration until after run loop is established
         DispatchQueue.main.async {
             GlobalSearchPopupController.shared.registerHotkey()

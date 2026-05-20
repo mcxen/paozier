@@ -38,6 +38,8 @@ class AppSettings: ObservableObject, Codable {
     @Published var memosSources: [MemosSourceConfig] = []
     @Published var quickSearchMenuBarEnabled: Bool = false
     @Published var quickSearchPanelAlwaysOnTop: Bool = true
+    @Published var appIconPreset: String = AppIconPreset.default.rawValue
+    @Published var customAppIconPath: String = ""
 
     private static var filePath: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -51,6 +53,7 @@ class AppSettings: ObservableObject, Codable {
         case httpPort, httpAutoStart, mcpPort, mcpAutoStart
         case defaultPreviewMode, historyMaxItems, excludedExtensions, searchFilenames, languagePreference, matchContextChars, enableImageOCR, imageOCRScope, memosSources
         case quickSearchMenuBarEnabled, quickSearchPanelAlwaysOnTop
+        case appIconPreset, customAppIconPath
     }
 
     init() { load() }
@@ -75,6 +78,8 @@ class AppSettings: ObservableObject, Codable {
         memosSources = (try? c.decode([MemosSourceConfig].self, forKey: .memosSources)) ?? []
         quickSearchMenuBarEnabled = (try? c.decode(Bool.self, forKey: .quickSearchMenuBarEnabled)) ?? false
         quickSearchPanelAlwaysOnTop = (try? c.decode(Bool.self, forKey: .quickSearchPanelAlwaysOnTop)) ?? true
+        appIconPreset = (try? c.decode(String.self, forKey: .appIconPreset)) ?? AppIconPreset.default.rawValue
+        customAppIconPath = (try? c.decode(String.self, forKey: .customAppIconPath)) ?? ""
     }
 
     func encode(to encoder: Encoder) throws {
@@ -97,6 +102,8 @@ class AppSettings: ObservableObject, Codable {
         try c.encode(memosSources, forKey: .memosSources)
         try c.encode(quickSearchMenuBarEnabled, forKey: .quickSearchMenuBarEnabled)
         try c.encode(quickSearchPanelAlwaysOnTop, forKey: .quickSearchPanelAlwaysOnTop)
+        try c.encode(appIconPreset, forKey: .appIconPreset)
+        try c.encode(customAppIconPath, forKey: .customAppIconPath)
     }
 
     func save() {
@@ -125,6 +132,8 @@ class AppSettings: ObservableObject, Codable {
         memosSources = decoded.memosSources
         quickSearchMenuBarEnabled = decoded.quickSearchMenuBarEnabled
         quickSearchPanelAlwaysOnTop = decoded.quickSearchPanelAlwaysOnTop
+        appIconPreset = decoded.appIconPreset
+        customAppIconPath = decoded.customAppIconPath
         UserDefaults.standard.set(languagePreference, forKey: "languagePreference")
     }
 }
