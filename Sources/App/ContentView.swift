@@ -71,6 +71,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView(activePane: $activePane)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
         } content: {
             if activePane == .search {
                 contentPane
@@ -83,7 +84,7 @@ struct ContentView: View {
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.2), value: selectedResult?.id)
         }
-        .navigationSplitViewStyle(.balanced)
+        .navigationSplitViewStyle(.prominentDetail)
         .sheet(isPresented: $showCompendium) { CompendiumView().environmentObject(dataManager) }
         .background {
             Button("") { GlobalSearchPopupController.shared.toggle() }
@@ -627,7 +628,7 @@ struct ContentView: View {
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(.tertiary)
                                 .frame(width: 22, alignment: .trailing)
-                            Text(match.snippet)
+                            Text(highlightedDocumentMatchSnippet(match.snippet))
                                 .font(.system(size: 12))
                                 .lineLimit(3)
                                 .foregroundStyle(.primary)
@@ -642,6 +643,47 @@ struct ContentView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func highlightedDocumentMatchSnippet(_ snippet: String) -> AttributedString {
+        var attributed = AttributedString(snippet)
+        if currentSearchOptions.usesRegex {
+            highlightRegex(currentSearchOptions.trimmedQuery, in: snippet, attributed: &attributed, color: .yellow.opacity(0.68), foreground: .black)
+        } else {
+            highlightTerms(searchTerms, in: snippet, attributed: &attributed, color: .yellow.opacity(0.68), foreground: .black)
+        }
+        highlightTerms(previewFindTerms, in: snippet, attributed: &attributed, color: .cyan.opacity(0.5), foreground: .black)
+        return attributed
+    }
+
+    private func highlightTerms(_ terms: [String], in content: String, attributed: inout AttributedString, color: Color, foreground: Color) {
+        let lower = content.lowercased()
+        for term in terms where !term.isEmpty {
+            let termLower = term.lowercased()
+            var searchStart = lower.startIndex
+            while let range = lower.range(of: termLower, range: searchStart..<lower.endIndex) {
+                applyHighlight(range, in: &attributed, color: color, foreground: foreground)
+                searchStart = range.upperBound
+            }
+        }
+    }
+
+    private func highlightRegex(_ pattern: String, in content: String, attributed: inout AttributedString, color: Color, foreground: Color) {
+        guard !pattern.isEmpty,
+              let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return }
+        let range = NSRange(content.startIndex..<content.endIndex, in: content)
+        for match in regex.matches(in: content, range: range) {
+            guard let swiftRange = Range(match.range, in: content) else { continue }
+            applyHighlight(swiftRange, in: &attributed, color: color, foreground: foreground)
+        }
+    }
+
+    private func applyHighlight(_ range: Range<String.Index>, in attributed: inout AttributedString, color: Color, foreground: Color) {
+        guard let start = AttributedString.Index(range.lowerBound, within: attributed),
+              let end = AttributedString.Index(range.upperBound, within: attributed) else { return }
+        attributed[start..<end].backgroundColor = color
+        attributed[start..<end].foregroundColor = foreground
+        attributed[start..<end].font = .system(size: 12, weight: .semibold)
     }
 
     private var matchNavigationControls: some View {

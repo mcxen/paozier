@@ -8,3 +8,4 @@ __pycache__/
 Sources/TUI/.venv/
 Sources/TUI/__pycache__/
 rust/**/target/
+public/

@@ -1,44 +1,54 @@
+<div align="center">
+
+<img width="128" height="128" alt="Paozier App Icon" src="https://github.com/user-attachments/assets/9ccc3ca1-9768-4a32-a747-16a1ba1dcc3b" />
+
 # Paozier
 
-> **"Paozier"** comes from "páo zi" (roe deer) — the cute, curious forest deer that always finds what it's looking for in the woods.
+> **"Paozier"** — from "páo zi" (roe deer), the cute, curious forest deer that always finds what it's looking for in the woods.
+
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue?logo=apple)](https://www.apple.com/macos/)
+[![Swift](https://img.shields.io/badge/Swift-5.9-orange?logo=swift)](https://swift.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+</div>
 
 ---
 
-A native macOS full-text search client powered by Apple SearchKit + SQLite FTS5 dual engines — sniffing out everything in your file forest like a roe deer.
-
-Search Interface
+A native macOS full-text search client powered by Apple SearchKit + SQLite FTS5 + Tantivy (Rust) triple engines — sniffing out everything in your file forest like a roe deer.
 
 ![Search Interface](README.assets/search-interface.png)
-
-Search results with indexed content preview:
 
 ![Search Results](README.assets/search-results.png)
 
 ## Features
 
-- Select local folders, auto-scan and index
-- Dual-engine search with SearchKit + FTS5, CJK support
+- Triple-engine fusion search (SearchKit + FTS5 + Tantivy), CJK-aware
+- Instant file search (ripgrep/grep, no indexing wait)
 - Highlighted search snippets (Live Preview)
-- Built-in multi-format preview (PDF / QuickLook / Text)
+- Multi-format preview (PDF / QuickLook / Text)
+- Global search popup (`⌘⇧F`) & Quick search panel (`⌘⇧K`), launch from any app
+- Advanced query syntax: AND / OR / NOT, phrases, wildcards
+- Regex search · Proximity search · Fuzzy space matching
+- Image OCR (Vision framework)
 - Incremental indexing, multi-folder management
-- Built-in HTTP search service (port 9880)
-- Built-in MCP server (port 9881) for AI tool integration
+- Built-in HTTP search service (port 9880) with web UI
+- Built-in MCP server (port 9881) for AI tool integration (Cursor / Claude / etc.)
+- External Memos source search
 - Bundled Textual terminal client (TUI)
-- Search history, bookmarks, reports
+- Search history, bookmarks, compendium · Custom app icons
 
 ## Supported Formats
 
-PDF · Word (docx) · Excel (xlsx) · PowerPoint (pptx) · RTF · HTML · TXT · Markdown · JSON · XML · CSV · EPUB · Code files (swift/py/js/ts/java/c/cpp/rs/go etc.)
+PDF · Word (docx/doc) · Excel (xlsx/xls) · PowerPoint (pptx/ppt) · RTF · ODT · EPUB · HTML · TXT · Markdown · JSON · XML · CSV/TSV · YAML/TOML · Code files (Swift / Python / JS / TS / Java / C / C++ / Rust / Go / Ruby / PHP / Shell etc.)
 
 ## Tech Stack
 
-| Component | Description |
-|---|---|
-| SwiftUI | macOS 14+ native app |
-| Apple SearchKit | TF-IDF relevance ranking |
-| SQLite FTS5 | CJK full-text indexing |
-| Network.framework | Lightweight HTTP/TCP server |
-| PDFKit + QuickLook | File preview |
+- **SwiftUI** — macOS 14+ native app
+- **Apple SearchKit** — TF-IDF relevance ranking
+- **SQLite FTS5** — CJK full-text indexing
+- **Tantivy** (Rust sidecar) — N-gram tokenization for CJK substring matching
+- **Network.framework** — Lightweight HTTP/TCP server
+- **PDFKit + QuickLook + Vision** — File preview & image OCR
 
 ## Installation & Usage
 
@@ -47,50 +57,59 @@ PDF · Word (docx) · Excel (xlsx) · PowerPoint (pptx) · RTF · HTML · TXT ·
 - macOS 14 (Sonoma) or later
 - Xcode 15+ (with Swift toolchain)
 
-### Build & Run
+### Build from Source
 
 ```bash
-# Clone
-git clone https://github.com/user/paozier.git
+git clone https://github.com/mcxen/paozier.git
 cd paozier
 
-# Build
-swift build
-
-# Run (auto-starts HTTP:9880 and MCP:9881 services)
+# Build & run (auto-starts HTTP:9880 and MCP:9881)
 swift run Paozier
 ```
 
-No Java, Solr, or external dependencies required.
+### Package as .app
 
-### Basic Usage
+```bash
+# Build universal binary + .app bundle (includes Rust Tantivy sidecar)
+bash scripts/build_app.sh
 
-1. Launch the app, click "+" in sidebar to add folders
-2. Wait for indexing to complete
-3. Type keywords in the search bar to search
-4. Click results to preview with highlighted snippets
+# Install to /Applications
+bash scripts/install.sh
+```
+
+No Java, Solr, or external dependencies required. The Rust sidecar is auto-built from `rust/` source.
+
+### Quick Start
+
+| Action | Description |
+|--------|-------------|
+| Add folders | Click "+" in sidebar to add folders for indexing |
+| Search | Type keywords in search bar; supports AND/OR/NOT/wildcards |
+| Global popup | Press `⌘⇧F` from any app for Spotlight-like search |
+| Quick panel | Press `⌘⇧K` for a floating search panel |
+| Preview | Click results to view highlighted snippets and file content |
 
 ### TUI Client
 
-The repo also includes a Textual-based terminal client. Details live in [Sources/TUI/README.md](/Users/mcx/Documents/OpenSpring/paozier/Sources/TUI/README.md).
+Textual-based terminal search client:
 
 ```bash
 cd Sources/TUI
 ./run_tui.command
 ```
 
-On first launch it creates a local `.venv`, installs `Textual` / `httpx`, and tries to open the main app if the HTTP service is not ready. Common shortcuts: `Ctrl+F` search, `Ctrl+R` refresh, `Ctrl+O` open file, `Ctrl+E` reveal in Finder, `j/k` move, `Ctrl+Q` quit.
+Creates `.venv` and installs dependencies on first run. Auto-launches the main app if HTTP service is not ready.
 
 ### HTTP API
 
 ```bash
-# Status
-curl http://localhost:9880/api/status
-
 # Search
 curl "http://localhost:9880/api/search?q=keywords"
 
-# Web UI
+# Status
+curl http://localhost:9880/api/status
+
+# Web search UI
 open http://localhost:9880
 ```
 
@@ -99,20 +118,23 @@ open http://localhost:9880
 Integrate with AI tools via JSON-RPC 2.0:
 
 ```bash
-# Search documents
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_documents","arguments":{"query":"full text search"}}}' | nc localhost 9881
+curl -X POST http://localhost:9881 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_documents","arguments":{"query":"full text search"}}}'
 ```
 
-Available tools: `search_documents` · `get_document_content` · `index_folder` · `list_indexed_folders` · `index_status` · `list_files` · `get_file_info` · `remove_folder` · `reindex_all`
+Available tools: `search_documents` · `get_document_content` · `search_memos` · `grep_search` · `index_folder` · `list_indexed_folders` · `index_status` · `list_files` · `get_file_info` · `remove_folder` · `reindex_all`
 
 ## Data Storage
 
 Runtime data at `~/Library/Application Support/Paozier/`:
 
 | File | Purpose |
-|---|---|
+|------|---------|
 | `searchkit.index` | SearchKit index |
 | `fts.db` | SQLite FTS5 database |
+| `tantivy/` | Tantivy index directory |
+| `text_cache/` | Text extraction cache |
 | `folders.json` | Indexed folders |
 | `history.json` | Search history |
 | `bookmarks.json` | Bookmarks |
